@@ -3,7 +3,7 @@ import type { FastifyReply } from 'fastify';
 export interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
-  error?: string;
+  message?: string;
 }
 
 export function sendSuccess<T>(reply: FastifyReply, data: T, statusCode = 200): void {
@@ -13,9 +13,9 @@ export function sendSuccess<T>(reply: FastifyReply, data: T, statusCode = 200): 
 
 export function sendError(
   reply: FastifyReply,
-  error: string,
+  message: string,
   statusCode = 500,
 ): void {
-  const response: ApiResponse = { success: false, error };
+  const response: ApiResponse = { success: false, message };
   reply.status(statusCode).send(response);
 }

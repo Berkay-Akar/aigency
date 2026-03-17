@@ -7,6 +7,7 @@ import { healthRoutes } from './lib/health.route';
 import { authRoutes } from './modules/auth/auth.routes';
 import { workspaceRoutes } from './modules/workspace/workspace.routes';
 import { aiRoutes } from './modules/ai/ai.routes';
+import { assetRoutes } from './modules/ai/asset.routes';
 import { socialRoutes } from './modules/social/social.routes';
 import { schedulerRoutes } from './modules/scheduler/scheduler.routes';
 import { billingRoutes } from './modules/billing/billing.routes';
@@ -37,6 +38,7 @@ export function buildApp() {
   fastify.register(authRoutes);
   fastify.register(workspaceRoutes);
   fastify.register(aiRoutes);
+  fastify.register(assetRoutes);
   fastify.register(socialRoutes);
   fastify.register(schedulerRoutes);
   fastify.register(billingRoutes);

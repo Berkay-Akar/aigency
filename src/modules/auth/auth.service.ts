@@ -1,8 +1,10 @@
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
 import { prisma } from '../../lib/prisma';
 import type { RegisterInput, LoginInput, AuthUser, JwtPayload } from './auth.schema';
 
 const SALT_ROUNDS = 12;
+const REFRESH_TOKEN_TTL_DAYS = 30;
 
 function generateSlug(name: string): string {
   return name
@@ -14,6 +16,12 @@ function generateSlug(name: string): string {
 
 function makeSlugUnique(base: string): string {
   return `${base}-${Date.now().toString(36)}`;
+}
+
+function refreshTokenExpiresAt(): Date {
+  const d = new Date();
+  d.setDate(d.getDate() + REFRESH_TOKEN_TTL_DAYS);
+  return d;
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -52,9 +60,47 @@ export function sanitizeUser(user: {
   };
 }
 
+export async function generateRefreshToken(userId: string): Promise<string> {
+  const token = randomUUID();
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      refreshToken: token,
+      refreshTokenExpiresAt: refreshTokenExpiresAt(),
+    },
+  });
+  return token;
+}
+
+export async function rotateRefreshToken(
+  oldToken: string,
+): Promise<{ user: AuthUser; payload: JwtPayload; refreshToken: string }> {
+  const user = await prisma.user.findFirst({
+    where: { refreshToken: oldToken },
+  });
+
+  if (!user) {
+    throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 });
+  }
+
+  if (!user.refreshTokenExpiresAt || user.refreshTokenExpiresAt < new Date()) {
+    // Invalidate the expired token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken: null, refreshTokenExpiresAt: null },
+    });
+    throw Object.assign(new Error('Refresh token expired'), { statusCode: 401 });
+  }
+
+  const newRefreshToken = await generateRefreshToken(user.id);
+  const authUser = sanitizeUser({ ...user, role: user.role.toString() });
+
+  return { user: authUser, payload: buildJwtPayload(authUser), refreshToken: newRefreshToken };
+}
+
 export async function register(
   input: RegisterInput,
-): Promise<{ user: AuthUser; payload: JwtPayload }> {
+): Promise<{ user: AuthUser; payload: JwtPayload; refreshToken: string }> {
   const existing = await prisma.user.findUnique({
     where: { email: input.email },
   });
@@ -72,7 +118,7 @@ export async function register(
     data: {
       name: input.workspaceName,
       slug,
-      ownerId: 'pending', // updated after user creation
+      ownerId: 'pending',
     },
   });
 
@@ -86,19 +132,19 @@ export async function register(
     },
   });
 
-  // backfill ownerId now that we have the user id
   await prisma.workspace.update({
     where: { id: workspace.id },
     data: { ownerId: user.id },
   });
 
+  const refreshToken = await generateRefreshToken(user.id);
   const authUser = sanitizeUser({ ...user, role: user.role.toString() });
-  return { user: authUser, payload: buildJwtPayload(authUser) };
+  return { user: authUser, payload: buildJwtPayload(authUser), refreshToken };
 }
 
 export async function login(
   input: LoginInput,
-): Promise<{ user: AuthUser; payload: JwtPayload }> {
+): Promise<{ user: AuthUser; payload: JwtPayload; refreshToken: string }> {
   const user = await prisma.user.findUnique({
     where: { email: input.email },
   });
@@ -113,6 +159,7 @@ export async function login(
     throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
   }
 
+  const refreshToken = await generateRefreshToken(user.id);
   const authUser = sanitizeUser({ ...user, role: user.role.toString() });
-  return { user: authUser, payload: buildJwtPayload(authUser) };
+  return { user: authUser, payload: buildJwtPayload(authUser), refreshToken };
 }

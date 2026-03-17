@@ -33,27 +33,50 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users           User[]
+  users             User[]
   socialConnections SocialConnection[]
-  scheduledPosts  ScheduledPost[]
+  scheduledPosts    ScheduledPost[]
+  assets            Asset[]
 
   @@index([slug])
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  name         String
-  role         Role      @default(MEMBER)
-  workspaceId  String
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  email                 String    @unique
+  passwordHash          String
+  name                  String
+  role                  Role      @default(MEMBER)
+  workspaceId           String
+  refreshToken          String?
+  refreshTokenExpiresAt DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([email])
   @@index([workspaceId])
+  @@index([refreshToken])
+}
+
+model Asset {
+  id          String   @id @default(cuid())
+  workspaceId String
+  jobId       String   @unique
+  type        String
+  url         String
+  r2Key       String
+  contentType String
+  caption     String
+  hashtags    String[]
+  createdAt   DateTime @default(now())
+
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scheduledPosts ScheduledPost[]
+
+  @@index([workspaceId])
+  @@index([jobId])
 }
 
 model SocialConnection {
@@ -90,6 +113,7 @@ model ScheduledPost {
   updatedAt    DateTime   @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  asset     Asset     @relation(fields: [assetId], references: [id])
 
   @@index([workspaceId])
   @@index([scheduledAt, status])

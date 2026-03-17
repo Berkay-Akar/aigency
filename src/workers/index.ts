@@ -56,15 +56,34 @@ export const aiWorker = new Worker<AiJobPayload>(
     // Step 3: Download and re-upload to R2
     const assetResponse = await fetch(resultUrl);
     const assetBuffer = Buffer.from(await assetResponse.arrayBuffer());
-    const r2Key = `workspaces/${workspaceId}/assets/${jobId}.${contentType.split('/')[1] ?? 'bin'}`;
+    const ext = contentType.split('/')[1] ?? 'bin';
+    const r2Key = `workspaces/${workspaceId}/assets/${jobId}.${ext}`;
     const publicUrl = await uploadFile(r2Key, assetBuffer, contentType);
 
     job.log(`[ai-worker] Uploaded to R2: ${publicUrl}`);
+
+    // Step 4: Persist Asset record in DB
+    await prisma.asset.create({
+      data: {
+        id: jobId,
+        workspaceId,
+        jobId,
+        type,
+        url: publicUrl,
+        r2Key,
+        contentType,
+        caption: optimized.caption,
+        hashtags: optimized.hashtags,
+      },
+    });
+
+    job.log(`[ai-worker] Asset saved to DB: ${jobId}`);
 
     return {
       jobId,
       workspaceId,
       userId,
+      assetId: jobId,
       assetUrl: publicUrl,
       caption: optimized.caption,
       hashtags: optimized.hashtags,
@@ -94,11 +113,20 @@ export const publishWorker = new Worker<PublishJobPayload>(
       return;
     }
 
-    const connection = await prisma.socialConnection.findFirst({
+    // Resolve asset URL from DB
+    const asset = await prisma.asset.findUnique({
+      where: { id: post.assetId },
+    });
+
+    if (!asset) {
+      throw new Error(`Asset ${post.assetId} not found for post ${scheduledPostId}`);
+    }
+
+    const socialConnection = await prisma.socialConnection.findFirst({
       where: { workspaceId, platform: post.platform },
     });
 
-    if (!connection) {
+    if (!socialConnection) {
       throw new Error(`No social connection for platform ${post.platform} in workspace ${workspaceId}`);
     }
 
@@ -108,14 +136,14 @@ export const publishWorker = new Worker<PublishJobPayload>(
 
     if (post.platform === 'INSTAGRAM') {
       result = await InstagramService.publishPost({
-        accessToken: connection.accessToken,
-        imageUrl: post.assetId,
+        accessToken: socialConnection.accessToken,
+        imageUrl: asset.url,
         caption,
       });
     } else {
       result = await TikTokService.publishPost({
-        accessToken: connection.accessToken,
-        videoUrl: post.assetId,
+        accessToken: socialConnection.accessToken,
+        videoUrl: asset.url,
         caption,
       });
     }
@@ -136,12 +164,11 @@ export const publishWorker = new Worker<PublishJobPayload>(
       data: { status: 'PUBLISHED', errorMessage: null },
     });
 
-    job.log(`[publish-worker] Post ${scheduledPostId} published successfully. Platform postId: ${result.postId}`);
+    job.log(`[publish-worker] Post ${scheduledPostId} published. Platform postId: ${result.postId}`);
   },
   workerOptions,
 );
 
-// Log worker events
 aiWorker.on('completed', (job) => {
   console.log(`[ai-worker] Job ${job.id} completed`);
 });
