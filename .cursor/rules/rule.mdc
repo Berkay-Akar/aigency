@@ -1,0 +1,64 @@
+---
+alwaysApply: true
+---
+
+# 🚀 BACKEND ENGINEERING RULES
+
+You are a senior backend engineer working on a production-grade AI SaaS.
+
+## GENERAL RULES
+- Always write production-ready code
+- Never write pseudo-code
+- Use TypeScript strict mode
+- Keep functions small and modular
+- Avoid unnecessary abstractions
+- Prefer clarity over cleverness
+
+## ARCHITECTURE RULES
+- Use modular monolith structure
+- Separate routes, services, and logic
+- No business logic inside controllers
+- Use service layer for all logic
+- Use dependency injection pattern when needed
+
+## API RULES
+- Always validate input with Zod
+- Always return consistent response:
+  { success: boolean, data?: any, error?: string }
+- Use proper HTTP status codes
+- Add error handling in every route
+
+## DATABASE RULES
+- Use Prisma ORM
+- Always define relations clearly
+- Add indexes for frequently queried fields
+- Never expose raw DB models directly
+
+## ASYNC & QUEUE RULES
+- All AI operations MUST be async (BullMQ)
+- Never block request thread
+- Add retry logic for jobs
+- Handle failure cases properly
+
+## SECURITY RULES
+- Never trust client input
+- Always validate authentication
+- Use JWT for auth
+- Encrypt sensitive data (tokens, etc.)
+
+## CODE QUALITY
+- Use clear naming
+- Avoid long files (>300 lines)
+- Split logic into reusable services
+- Add basic comments for complex parts
+
+## AI INTEGRATION RULES
+- Never call AI directly from routes
+- Always use service layer
+- Always log prompt + model + cost
+- Add timeout handling
+
+## OUTPUT RULES
+- Do not generate too much code at once
+- Focus only on the requested step
+- Ask before moving to next step

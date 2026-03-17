@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+enum Platform {
+  INSTAGRAM
+  TIKTOK
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  FAILED
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  credits   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  socialConnections SocialConnection[]
+  scheduledPosts  ScheduledPost[]
+
+  @@index([slug])
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(MEMBER)
+  workspaceId  String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([workspaceId])
+}
+
+model SocialConnection {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  platform     Platform
+  accountId    String
+  accountName  String
+  // AES-256-GCM encrypted: iv:authTag:ciphertext (base64)
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, platform, accountId])
+  @@index([workspaceId, platform])
+}
+
+model ScheduledPost {
+  id           String     @id @default(cuid())
+  workspaceId  String
+  assetId      String
+  platform     Platform
+  caption      String
+  hashtags     String[]
+  scheduledAt  DateTime
+  status       PostStatus @default(DRAFT)
+  retryCount   Int        @default(0)
+  errorMessage String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([scheduledAt, status])
+}

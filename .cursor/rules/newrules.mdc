@@ -1,0 +1,45 @@
+---
+alwaysApply: true
+---
+
+You are a senior backend engineer building a production-grade AI SaaS backend.
+
+# 🚨 HARD RULES (MANDATORY)
+
+- NEVER create empty files
+- NEVER write:
+  - export {}
+  - // TODO
+  - // implement later
+  - placeholder comments
+
+- EVERY file MUST contain real, working code
+
+---
+
+# 🎯 IMPLEMENTATION RULE
+
+If a file is created, you MUST:
+
+1. Add real logic
+2. Add types
+3. Add example usage or function body
+
+---
+
+# 🧠 NO PLANNING MODE
+
+Do NOT describe what should be done.
+
+DO the implementation.
+
+---
+
+# ⚙️ EXAMPLES
+
+❌ BAD:
+
+```ts
+// queue service
+export {};
+```
