@@ -6,6 +6,34 @@ import { prisma } from '../../lib/prisma';
 import { encryptToken } from '../../services/social';
 import { sendSuccess, sendError } from '../../utils/response';
 
+type SocialOAuthJwt = {
+  purpose: string;
+  platform: string;
+  workspaceId: string;
+  sub: string;
+};
+
+function verifySocialOAuthState(
+  fastify: FastifyInstance,
+  state: string,
+  platform: 'instagram' | 'tiktok',
+): SocialOAuthJwt | null {
+  try {
+    const payload = fastify.jwt.verify(state) as Partial<SocialOAuthJwt>;
+    if (
+      payload.purpose !== 'social_oauth' ||
+      payload.platform !== platform ||
+      typeof payload.workspaceId !== 'string' ||
+      typeof payload.sub !== 'string'
+    ) {
+      return null;
+    }
+    return payload as SocialOAuthJwt;
+  } catch {
+    return null;
+  }
+}
+
 export async function socialRoutes(fastify: FastifyInstance): Promise<void> {
   // Redirect user to platform OAuth page
   fastify.get(
@@ -19,6 +47,17 @@ export async function socialRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const { platform } = paramsParsed.data;
+      const { workspaceId, sub } = getUser(request);
+
+      const state = fastify.jwt.sign(
+        {
+          purpose: 'social_oauth',
+          platform,
+          workspaceId,
+          sub,
+        },
+        { expiresIn: '10m' },
+      );
 
       if (platform === 'instagram') {
         const url = new URL('https://api.instagram.com/oauth/authorize');
@@ -26,30 +65,48 @@ export async function socialRoutes(fastify: FastifyInstance): Promise<void> {
         url.searchParams.set('redirect_uri', env.INSTAGRAM_REDIRECT_URI);
         url.searchParams.set('scope', 'instagram_basic,instagram_content_publish');
         url.searchParams.set('response_type', 'code');
+        url.searchParams.set('state', state);
         return reply.redirect(url.toString());
       }
 
-      // TikTok
       const url = new URL('https://www.tiktok.com/v2/auth/authorize/');
       url.searchParams.set('client_key', env.TIKTOK_CLIENT_KEY);
       url.searchParams.set('redirect_uri', env.TIKTOK_REDIRECT_URI);
       url.searchParams.set('scope', 'user.info.basic,video.publish');
       url.searchParams.set('response_type', 'code');
+      url.searchParams.set('state', state);
       return reply.redirect(url.toString());
     },
   );
 
-  // Handle Instagram OAuth callback
-  fastify.get(
-    '/social/callback/instagram',
-    { preHandler: authenticate },
-    async (request, reply) => {
-      const { workspaceId } = getUser(request);
+  fastify.get('/social/callback/instagram', async (request, reply) => {
+      const raw = request.query as Record<string, string | undefined>;
+      if (raw.error) {
+        return sendError(
+          reply,
+          raw.error_description ?? raw.error,
+          400,
+        );
+      }
+
       const parsed = InstagramCallbackSchema.safeParse(request.query);
 
       if (!parsed.success) {
-        return sendError(reply, 'Missing OAuth code', 400);
+        return sendError(reply, 'Invalid OAuth callback (code and state required)', 400);
       }
+
+      const q = parsed.data;
+
+      const statePayload = verifySocialOAuthState(
+        fastify,
+        q.state,
+        'instagram',
+      );
+      if (!statePayload) {
+        return sendError(reply, 'Invalid or expired state', 400);
+      }
+
+      const workspaceId = statePayload.workspaceId;
 
       try {
         // Exchange code for token
@@ -61,7 +118,7 @@ export async function socialRoutes(fastify: FastifyInstance): Promise<void> {
             client_secret: env.INSTAGRAM_CLIENT_SECRET,
             grant_type: 'authorization_code',
             redirect_uri: env.INSTAGRAM_REDIRECT_URI,
-            code: parsed.data.code,
+            code: q.code,
           }).toString(),
         });
 
@@ -109,20 +166,32 @@ export async function socialRoutes(fastify: FastifyInstance): Promise<void> {
         fastify.log.error({ err }, 'Instagram OAuth callback failed');
         return sendError(reply, error.message, 500);
       }
-    },
-  );
+    });
 
-  // Handle TikTok OAuth callback
-  fastify.get(
-    '/social/callback/tiktok',
-    { preHandler: authenticate },
-    async (request, reply) => {
-      const { workspaceId } = getUser(request);
+  fastify.get('/social/callback/tiktok', async (request, reply) => {
+      const raw = request.query as Record<string, string | undefined>;
+      if (raw.error) {
+        return sendError(
+          reply,
+          raw.error_description ?? raw.error,
+          400,
+        );
+      }
+
       const parsed = TikTokCallbackSchema.safeParse(request.query);
 
       if (!parsed.success) {
-        return sendError(reply, 'Missing OAuth code', 400);
+        return sendError(reply, 'Invalid OAuth callback (code and state required)', 400);
       }
+
+      const q = parsed.data;
+
+      const statePayload = verifySocialOAuthState(fastify, q.state, 'tiktok');
+      if (!statePayload) {
+        return sendError(reply, 'Invalid or expired state', 400);
+      }
+
+      const workspaceId = statePayload.workspaceId;
 
       try {
         const tokenRes = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
@@ -133,7 +202,7 @@ export async function socialRoutes(fastify: FastifyInstance): Promise<void> {
             client_secret: env.TIKTOK_CLIENT_SECRET,
             grant_type: 'authorization_code',
             redirect_uri: env.TIKTOK_REDIRECT_URI,
-            code: parsed.data.code,
+            code: q.code,
           }).toString(),
         });
 
@@ -195,8 +264,7 @@ export async function socialRoutes(fastify: FastifyInstance): Promise<void> {
         fastify.log.error({ err }, 'TikTok OAuth callback failed');
         return sendError(reply, error.message, 500);
       }
-    },
-  );
+    });
 
   // List connected social accounts for the workspace
   fastify.get(

@@ -44,7 +44,10 @@ model Workspace {
 model User {
   id                    String    @id @default(cuid())
   email                 String    @unique
-  passwordHash          String
+  /// Null when user signed up with Google only
+  passwordHash          String?
+  /// Google OAuth subject (sub); unique when set
+  googleId              String?   @unique
   name                  String
   role                  Role      @default(MEMBER)
   workspaceId           String

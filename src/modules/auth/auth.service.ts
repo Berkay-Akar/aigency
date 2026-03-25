@@ -153,11 +153,89 @@ export async function login(
     throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
   }
 
+  if (!user.passwordHash) {
+    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+  }
+
   const valid = await verifyPassword(input.password, user.passwordHash);
 
   if (!valid) {
     throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
   }
+
+  const refreshToken = await generateRefreshToken(user.id);
+  const authUser = sanitizeUser({ ...user, role: user.role.toString() });
+  return { user: authUser, payload: buildJwtPayload(authUser), refreshToken };
+}
+
+export async function authenticateWithGoogle(input: {
+  googleId: string;
+  email: string;
+  name: string;
+}): Promise<{ user: AuthUser; payload: JwtPayload; refreshToken: string }> {
+  const byGoogle = await prisma.user.findUnique({
+    where: { googleId: input.googleId },
+  });
+
+  if (byGoogle) {
+    const refreshToken = await generateRefreshToken(byGoogle.id);
+    const authUser = sanitizeUser({
+      ...byGoogle,
+      role: byGoogle.role.toString(),
+    });
+    return { user: authUser, payload: buildJwtPayload(authUser), refreshToken };
+  }
+
+  const byEmail = await prisma.user.findUnique({
+    where: { email: input.email },
+  });
+
+  if (byEmail) {
+    if (byEmail.googleId && byEmail.googleId !== input.googleId) {
+      throw Object.assign(new Error('This email is linked to another Google account'), {
+        statusCode: 409,
+      });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: byEmail.id },
+      data: { googleId: input.googleId },
+    });
+
+    const refreshToken = await generateRefreshToken(updated.id);
+    const authUser = sanitizeUser({
+      ...updated,
+      role: updated.role.toString(),
+    });
+    return { user: authUser, payload: buildJwtPayload(authUser), refreshToken };
+  }
+
+  const baseSlug = generateSlug(input.name);
+  const slug = makeSlugUnique(baseSlug);
+
+  const workspace = await prisma.workspace.create({
+    data: {
+      name: `${input.name}'s workspace`,
+      slug,
+      ownerId: 'pending',
+    },
+  });
+
+  const user = await prisma.user.create({
+    data: {
+      email: input.email,
+      name: input.name,
+      passwordHash: null,
+      googleId: input.googleId,
+      role: 'OWNER',
+      workspaceId: workspace.id,
+    },
+  });
+
+  await prisma.workspace.update({
+    where: { id: workspace.id },
+    data: { ownerId: user.id },
+  });
 
   const refreshToken = await generateRefreshToken(user.id);
   const authUser = sanitizeUser({ ...user, role: user.role.toString() });

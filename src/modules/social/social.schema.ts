@@ -6,13 +6,17 @@ export const PlatformParamSchema = z.object({
 
 export const InstagramCallbackSchema = z.object({
   code: z.string().min(1),
-  state: z.string().optional(),
+  state: z.string().min(1),
+  error: z.string().optional(),
+  error_description: z.string().optional(),
 });
 
 export const TikTokCallbackSchema = z.object({
   code: z.string().min(1),
-  state: z.string().optional(),
+  state: z.string().min(1),
   scopes: z.string().optional(),
+  error: z.string().optional(),
+  error_description: z.string().optional(),
 });
 
 export type PlatformParam = z.infer<typeof PlatformParamSchema>;

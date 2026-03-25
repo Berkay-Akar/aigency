@@ -39,6 +39,11 @@ const envSchema = z.object({
   TIKTOK_CLIENT_SECRET: z.string().min(1),
   TIKTOK_REDIRECT_URI: z.string().url(),
 
+  /** Leave empty until Google Cloud OAuth credentials exist */
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
+  GOOGLE_REDIRECT_URI: z.string().default(""),
+
   APP_URL: z.string().url(),
 });
 
@@ -52,3 +57,11 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export type Env = typeof env;
+
+export function isGoogleOAuthConfigured(): boolean {
+  return (
+    env.GOOGLE_CLIENT_ID.length > 0 &&
+    env.GOOGLE_CLIENT_SECRET.length > 0 &&
+    env.GOOGLE_REDIRECT_URI.length > 0
+  );
+}
