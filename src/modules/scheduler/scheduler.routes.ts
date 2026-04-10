@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate, getUser } from '../auth/auth.middleware';
-import { SchedulePostSchema, CalendarQuerySchema, PostIdParamSchema } from './scheduler.schema';
+import { SchedulePostSchema, CalendarQuerySchema, PostIdParamSchema, PostsQuerySchema } from './scheduler.schema';
 import {
   schedulePost,
   cancelPost,
-  getPostsByWorkspace,
+  getPostsByWorkspacePaged,
   getPostsByDateRange,
 } from '../../services/scheduler';
 import { sendSuccess, sendError } from '../../utils/response';
@@ -45,10 +45,30 @@ export async function schedulerRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: authenticate },
     async (request, reply) => {
       const { workspaceId } = getUser(request);
+      const parsed = PostsQuerySchema.safeParse(request.query);
+
+      if (!parsed.success) {
+        return sendError(reply, parsed.error.errors[0]?.message ?? 'Invalid query', 400);
+      }
 
       try {
-        const posts = await getPostsByWorkspace(workspaceId);
-        return sendSuccess(reply, { posts });
+        const { page, limit, status, from, to } = parsed.data;
+        const result = await getPostsByWorkspacePaged(workspaceId, {
+          page,
+          limit,
+          status,
+          from: from ? new Date(from) : undefined,
+          to: to ? new Date(to) : undefined,
+        });
+        return sendSuccess(reply, {
+          posts: result.posts,
+          pagination: {
+            page,
+            limit,
+            total: result.total,
+            pages: Math.ceil(result.total / limit),
+          },
+        });
       } catch (err) {
         const error = err as Error;
         return sendError(reply, error.message, 500);

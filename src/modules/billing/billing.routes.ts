@@ -1,26 +1,93 @@
 import crypto from 'crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { authenticate, getUser } from '../auth/auth.middleware';
-import { getBalance, addCredits } from './billing.service';
+import { getBalance } from './billing.service';
 import { env } from '../../config/env';
 import { sendSuccess, sendError } from '../../utils/response';
-import { z } from 'zod';
+import { prisma } from '../../lib/prisma';
+import { CallbackBodySchema, CreatePaymentSchema } from './billing.schema';
 
-const CreatePaymentSchema = z.object({
-  creditAmount: z.number().int().min(10).max(100_000),
-  price: z.number().positive(),
-  currency: z.string().length(3).default('TRY'),
-  callbackUrl: z.string().url(),
-  buyerName: z.string().min(1),
-  buyerSurname: z.string().min(1),
-  buyerEmail: z.string().email(),
-  buyerIp: z.string().min(1),
-  buyerCity: z.string().min(1),
-  buyerCountry: z.string().min(1),
-  buyerAddress: z.string().min(1),
-  buyerZip: z.string().min(1),
-  buyerPhone: z.string().min(1),
-});
+type CallbackBody = {
+  token: string;
+  conversationId: string;
+};
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+function buildCallbackPayloadString(body: CallbackBody): string {
+  return JSON.stringify({
+    conversationId: body.conversationId,
+    token: body.token,
+  });
+}
+
+function verifyIyzicoHmacSignature(
+  request: FastifyRequest,
+  body: CallbackBody,
+): boolean {
+  const signature = request.headers['x-iyzi-signature'];
+  const timestamp = request.headers['x-iyzi-timestamp'];
+  const nonce = request.headers['x-iyzi-nonce'];
+
+  if (
+    typeof signature !== 'string' ||
+    typeof timestamp !== 'string' ||
+    typeof nonce !== 'string'
+  ) {
+    return false;
+  }
+
+  if (!env.IYZICO_WEBHOOK_HMAC_SECRET) {
+    return false;
+  }
+
+  const payload = `${timestamp}.${nonce}.${buildCallbackPayloadString(body)}`;
+  const expected = crypto
+    .createHmac('sha256', env.IYZICO_WEBHOOK_HMAC_SECRET)
+    .update(payload)
+    .digest('hex');
+
+  return timingSafeEqual(signature, expected);
+}
+
+function verifyFallbackSharedSecret(request: FastifyRequest): boolean {
+  if (!env.IYZICO_WEBHOOK_SHARED_SECRET) return false;
+  const query = request.query as Record<string, string | undefined>;
+  const provided = query.s;
+  if (!provided) return false;
+  return timingSafeEqual(provided, env.IYZICO_WEBHOOK_SHARED_SECRET);
+}
+
+async function registerReplay(
+  replayKey: string,
+  conversationId: string,
+): Promise<boolean> {
+  try {
+    await prisma.paymentCallbackReplay.create({
+      data: {
+        replayKey,
+        source: 'iyzico',
+        conversationId,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      },
+    });
+    return true;
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002'
+    ) {
+      return false;
+    }
+    throw err;
+  }
+}
 
 export async function billingRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
@@ -50,7 +117,7 @@ export async function billingRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const { creditAmount, price, currency, callbackUrl, buyerName, buyerSurname,
-        buyerEmail, buyerIp, buyerCity, buyerCountry, buyerAddress, buyerZip, buyerPhone } = parsed.data;
+        buyerEmail, buyerIp, buyerCity, buyerCountry, buyerAddress, buyerZip, buyerPhone, buyerIdentityNumber } = parsed.data;
 
       const conversationId = `ws-${workspaceId}-${Date.now()}`;
       const basketId = `credits-${creditAmount}`;
@@ -69,7 +136,7 @@ export async function billingRoutes(fastify: FastifyInstance): Promise<void> {
           name: buyerName,
           surname: buyerSurname,
           email: buyerEmail,
-          identityNumber: '11111111111',
+          identityNumber: buyerIdentityNumber,
           lastLoginDate: new Date().toISOString().replace('T', ' ').slice(0, 19),
           registrationDate: new Date().toISOString().replace('T', ' ').slice(0, 19),
           registrationAddress: buyerAddress,
@@ -118,14 +185,35 @@ export async function billingRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // iyzico calls this after payment
-  fastify.post('/billing/payment/callback', async (request, reply) => {
-    const body = request.body as { token?: string; conversationId?: string };
-
-    if (!body.token || !body.conversationId) {
+  fastify.post('/billing/payment/callback', {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: 60_000,
+      },
+    },
+  }, async (request, reply) => {
+    const parsed = CallbackBodySchema.safeParse(request.body);
+    if (!parsed.success) {
       return sendError(reply, 'Missing token or conversationId', 400);
     }
+    const body = parsed.data;
 
     try {
+      const signatureOk = verifyIyzicoHmacSignature(request, body);
+      const fallbackOk = verifyFallbackSharedSecret(request);
+      if (!signatureOk && !fallbackOk) {
+        return sendError(reply, 'Invalid callback signature', 401);
+      }
+
+      const replayKey = signatureOk
+        ? `sig:${request.headers['x-iyzi-signature'] as string}`
+        : `fallback:${body.conversationId}:${body.token}`;
+      const replayAccepted = await registerReplay(replayKey, body.conversationId);
+      if (!replayAccepted) {
+        return sendError(reply, 'Replay detected', 409);
+      }
+
       // Verify payment with iyzico
       const verifyRes = await fetch(`${env.IYZICO_BASE_URL}/payment/iyzipos/checkoutform/auth/ecom/detail`, {
         method: 'POST',
@@ -158,10 +246,43 @@ export async function billingRoutes(fastify: FastifyInstance): Promise<void> {
         return sendError(reply, 'Cannot parse payment context', 400);
       }
 
-      const credits = await addCredits(workspaceId, creditAmount);
+      const [transaction, credits] = await prisma.$transaction(async (tx) => {
+        const existing = await tx.paymentTransaction.findUnique({
+          where: { conversationId: body.conversationId },
+        });
 
-      fastify.log.info({ workspaceId, creditAmount, credits }, 'Credits added after payment');
-      return sendSuccess(reply, { credits });
+        if (existing) {
+          const workspace = await tx.workspace.findUnique({
+            where: { id: workspaceId },
+            select: { credits: true },
+          });
+          return [existing, workspace?.credits ?? 0] as const;
+        }
+
+        const created = await tx.paymentTransaction.create({
+          data: {
+            conversationId: body.conversationId,
+            workspaceId,
+            creditAmount,
+            amount: new Prisma.Decimal(data.price ?? '0'),
+            status: data.paymentStatus ?? 'SUCCESS',
+            raw: data,
+          },
+        });
+
+        const workspace = await tx.workspace.update({
+          where: { id: workspaceId },
+          data: { credits: { increment: creditAmount } },
+          select: { credits: true },
+        });
+        return [created, workspace.credits] as const;
+      });
+
+      fastify.log.info(
+        { workspaceId, creditAmount, credits, conversationId: transaction.conversationId },
+        'Payment callback processed',
+      );
+      return sendSuccess(reply, { credits, conversationId: transaction.conversationId });
     } catch (err) {
       const error = err as Error;
       fastify.log.error({ err }, 'Payment callback processing failed');

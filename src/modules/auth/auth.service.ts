@@ -173,6 +173,18 @@ export async function authenticateWithGoogle(input: {
   email: string;
   name: string;
 }): Promise<{ user: AuthUser; payload: JwtPayload; refreshToken: string }> {
+  async function logGoogleEvent(eventType: 'GOOGLE_LINKED' | 'GOOGLE_UNLINKED', userId: string | null): Promise<void> {
+    await prisma.authAuditLog.create({
+      data: {
+        eventType,
+        userId,
+        email: input.email,
+        provider: 'google',
+        providerSubject: input.googleId,
+      },
+    });
+  }
+
   const byGoogle = await prisma.user.findUnique({
     where: { googleId: input.googleId },
   });
@@ -201,6 +213,7 @@ export async function authenticateWithGoogle(input: {
       where: { id: byEmail.id },
       data: { googleId: input.googleId },
     });
+    await logGoogleEvent('GOOGLE_LINKED', updated.id);
 
     const refreshToken = await generateRefreshToken(updated.id);
     const authUser = sanitizeUser({
@@ -238,6 +251,41 @@ export async function authenticateWithGoogle(input: {
   });
 
   const refreshToken = await generateRefreshToken(user.id);
+  await logGoogleEvent('GOOGLE_LINKED', user.id);
   const authUser = sanitizeUser({ ...user, role: user.role.toString() });
   return { user: authUser, payload: buildJwtPayload(authUser), refreshToken };
+}
+
+export async function unlinkGoogleFromUser(userId: string): Promise<AuthUser> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+  if (!user) {
+    throw Object.assign(new Error('User not found'), { statusCode: 404 });
+  }
+  if (!user.googleId) {
+    throw Object.assign(new Error('Google is not linked'), { statusCode: 400 });
+  }
+  if (!user.passwordHash) {
+    throw Object.assign(
+      new Error('Set a password before unlinking Google'),
+      { statusCode: 400 },
+    );
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: userId },
+    data: { googleId: null },
+  });
+
+  await prisma.authAuditLog.create({
+    data: {
+      eventType: 'GOOGLE_UNLINKED',
+      userId: updated.id,
+      email: updated.email,
+      provider: 'google',
+    },
+  });
+
+  return sanitizeUser({ ...updated, role: updated.role.toString() });
 }

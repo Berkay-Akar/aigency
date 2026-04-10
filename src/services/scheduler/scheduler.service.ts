@@ -1,5 +1,5 @@
 import { prisma } from '../../lib/prisma';
-import { addPublishJob } from '../queue';
+import { addPublishJob, removePublishJobById } from '../queue';
 import type { Platform, PostStatus } from '@prisma/client';
 
 export interface SchedulePostInput {
@@ -20,6 +20,7 @@ export interface ScheduledPostRecord {
   hashtags: string[];
   scheduledAt: Date;
   status: PostStatus;
+  publishJobId: string | null;
   retryCount: number;
   errorMessage: string | null;
   createdAt: Date;
@@ -46,9 +47,15 @@ export async function schedulePost(input: SchedulePostInput): Promise<ScheduledP
 
   const delayMs = input.scheduledAt.getTime() - now.getTime();
 
-  await addPublishJob({ scheduledPostId: post.id, workspaceId: input.workspaceId }, delayMs);
+  const publishJobId = await addPublishJob(
+    { scheduledPostId: post.id, workspaceId: input.workspaceId },
+    delayMs,
+  );
 
-  return post;
+  return prisma.scheduledPost.update({
+    where: { id: post.id },
+    data: { publishJobId },
+  });
 }
 
 export async function cancelPost(
@@ -67,10 +74,50 @@ export async function cancelPost(
     throw Object.assign(new Error('Cannot cancel an already published post'), { statusCode: 409 });
   }
 
+  if (post.publishJobId) {
+    await removePublishJobById(post.publishJobId);
+  }
+
   return prisma.scheduledPost.update({
     where: { id: postId },
-    data: { status: 'DRAFT' },
+    data: { status: 'DRAFT', publishJobId: null },
   });
+}
+
+export async function getPostsByWorkspacePaged(
+  workspaceId: string,
+  options: {
+    status?: PostStatus;
+    from?: Date;
+    to?: Date;
+    page: number;
+    limit: number;
+  },
+): Promise<{ posts: ScheduledPostRecord[]; total: number }> {
+  const where = {
+    workspaceId,
+    ...(options.status ? { status: options.status } : {}),
+    ...((options.from || options.to)
+      ? {
+          scheduledAt: {
+            ...(options.from ? { gte: options.from } : {}),
+            ...(options.to ? { lte: options.to } : {}),
+          },
+        }
+      : {}),
+  };
+
+  const [posts, total] = await Promise.all([
+    prisma.scheduledPost.findMany({
+      where,
+      orderBy: { scheduledAt: 'asc' },
+      skip: (options.page - 1) * options.limit,
+      take: options.limit,
+    }),
+    prisma.scheduledPost.count({ where }),
+  ]);
+
+  return { posts, total };
 }
 
 export async function getPostsByWorkspace(

@@ -1,6 +1,7 @@
 export {
   schedulePost,
   cancelPost,
+  getPostsByWorkspacePaged,
   getPostsByWorkspace,
   getPostsByDateRange,
   getDuePosts,

@@ -3,8 +3,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticate, getUser } from '../auth/auth.middleware';
 import { GenerateSchema } from './ai.schema';
-import { addAiJob, aiQueue } from '../../services/queue';
-import { deductCredits, refundCredits } from '../billing/billing.service';
+import { aiQueue, dispatchPendingOutboxJobs } from '../../services/queue';
+import { prisma } from '../../lib/prisma';
 import { sendSuccess, sendError } from '../../utils/response';
 
 const IMAGE_CREDIT_COST = 10;
@@ -30,33 +30,52 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
 
       const cost = type === 'image' ? IMAGE_CREDIT_COST : VIDEO_CREDIT_COST;
 
-      // Deduct credits before queuing — refund if enqueue fails
+      const jobId = randomUUID();
+
       try {
-        await deductCredits(workspaceId, cost);
+        await prisma.$transaction(async (tx) => {
+          const workspace = await tx.workspace.findUnique({
+            where: { id: workspaceId },
+            select: { credits: true },
+          });
+
+          if (!workspace) {
+            throw Object.assign(new Error('Workspace not found'), { statusCode: 404 });
+          }
+          if (workspace.credits < cost) {
+            throw Object.assign(new Error('Insufficient credits'), { statusCode: 402 });
+          }
+
+          await tx.workspace.update({
+            where: { id: workspaceId },
+            data: { credits: { decrement: cost } },
+          });
+
+          await tx.outboxJob.create({
+            data: {
+              queue: 'ai-jobs',
+              name: 'generate',
+              dedupeKey: `ai-generate:${jobId}`,
+              payload: {
+                jobId,
+                workspaceId,
+                userId,
+                type,
+                prompt,
+                options: { platform, style, targetAudience, tone, ...options },
+              },
+            },
+          });
+        });
       } catch (err) {
         const error = err as Error & { statusCode?: number };
         return sendError(reply, error.message, error.statusCode ?? 402);
       }
 
-      const jobId = randomUUID();
-
       try {
-        await addAiJob({
-          jobId,
-          workspaceId,
-          userId,
-          type,
-          prompt,
-          options: { platform, style, targetAudience, tone, ...options },
-        });
-
+        await dispatchPendingOutboxJobs(20);
         return sendSuccess(reply, { jobId, status: 'queued', creditsCost: cost }, 202);
       } catch (err) {
-        // Enqueue failed — refund credits
-        await refundCredits(workspaceId, cost).catch((refundErr: unknown) => {
-          fastify.log.error({ refundErr, workspaceId, cost }, 'Credit refund failed after job enqueue failure');
-        });
-
         const error = err as Error;
         fastify.log.error({ err, jobId }, 'Failed to enqueue AI job');
         return sendError(reply, error.message, 500);
@@ -80,7 +99,23 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       const job = await aiQueue.getJob(jobId);
 
       if (!job) {
-        return sendError(reply, 'Job not found', 404);
+        const outbox = await prisma.outboxJob.findUnique({
+          where: { dedupeKey: `ai-generate:${jobId}` },
+        });
+        if (!outbox) {
+          return sendError(reply, 'Job not found', 404);
+        }
+        const payload = outbox.payload as { workspaceId?: string };
+        if (payload.workspaceId !== workspaceId) {
+          return sendError(reply, 'Job not found', 404);
+        }
+
+        return sendSuccess(reply, {
+          id: jobId,
+          status: outbox.status === 'FAILED' ? 'failed' : 'queued',
+          result: undefined,
+          failedReason: outbox.lastError ?? undefined,
+        });
       }
 
       // Verify this job belongs to the requesting workspace

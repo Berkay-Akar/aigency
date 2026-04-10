@@ -1,9 +1,15 @@
 import { Worker } from 'bullmq';
 import { env } from '../config/env';
+import './outbox.dispatcher';
+import './social-token-refresh.worker';
 import { generateImage, generateVideo } from '../services/ai';
 import { optimizePrompt } from '../services/prompt-builder';
 import { uploadFile } from '../services/storage';
-import { InstagramService, TikTokService } from '../services/social';
+import {
+  InstagramService,
+  TikTokService,
+  refreshConnectionIfNeeded,
+} from '../services/social';
 import { prisma } from '../lib/prisma';
 import type { AiJobPayload, PublishJobPayload } from '../services/queue';
 
@@ -130,19 +136,27 @@ export const publishWorker = new Worker<PublishJobPayload>(
       throw new Error(`No social connection for platform ${post.platform} in workspace ${workspaceId}`);
     }
 
+    await refreshConnectionIfNeeded(socialConnection.id);
+    const refreshedConnection = await prisma.socialConnection.findUnique({
+      where: { id: socialConnection.id },
+    });
+    if (!refreshedConnection || refreshedConnection.status === 'INVALID') {
+      throw new Error(`Social connection is invalid for platform ${post.platform}`);
+    }
+
     const caption = `${post.caption}\n\n${post.hashtags.map((h) => `#${h}`).join(' ')}`;
 
     let result: { success: boolean; postId?: string; error?: string };
 
     if (post.platform === 'INSTAGRAM') {
       result = await InstagramService.publishPost({
-        accessToken: socialConnection.accessToken,
+        accessToken: refreshedConnection.accessToken,
         imageUrl: asset.url,
         caption,
       });
     } else {
       result = await TikTokService.publishPost({
-        accessToken: socialConnection.accessToken,
+        accessToken: refreshedConnection.accessToken,
         videoUrl: asset.url,
         caption,
       });

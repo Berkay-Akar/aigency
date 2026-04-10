@@ -30,6 +30,8 @@ const envSchema = z.object({
   IYZICO_API_KEY: z.string().min(1),
   IYZICO_SECRET_KEY: z.string().min(1),
   IYZICO_BASE_URL: z.string().url(),
+  IYZICO_WEBHOOK_HMAC_SECRET: z.string().default(""),
+  IYZICO_WEBHOOK_SHARED_SECRET: z.string().default(""),
 
   INSTAGRAM_CLIENT_ID: z.string().min(1),
   INSTAGRAM_CLIENT_SECRET: z.string().min(1),
@@ -43,6 +45,12 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
   GOOGLE_REDIRECT_URI: z.string().default(""),
+
+  RESEND_API_KEY: z.string().default(""),
+  RESEND_FROM_EMAIL: z.string().default(""),
+
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(200),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
 
   APP_URL: z.string().url(),
 });
@@ -64,4 +72,8 @@ export function isGoogleOAuthConfigured(): boolean {
     env.GOOGLE_CLIENT_SECRET.length > 0 &&
     env.GOOGLE_REDIRECT_URI.length > 0
   );
+}
+
+export function isResendConfigured(): boolean {
+  return env.RESEND_API_KEY.length > 0 && env.RESEND_FROM_EMAIL.length > 0;
 }

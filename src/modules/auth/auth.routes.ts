@@ -7,9 +7,11 @@ import {
   login,
   rotateRefreshToken,
   authenticateWithGoogle,
+  unlinkGoogleFromUser,
 } from './auth.service';
 import { sendSuccess, sendError } from '../../utils/response';
 import { isGoogleOAuthConfigured } from '../../config/env';
+import { authenticate, getUser } from './auth.middleware';
 import {
   buildGoogleAuthorizationUrl,
   exchangeGoogleAuthorizationCode,
@@ -114,7 +116,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  fastify.post('/auth/register', async (request, reply) => {
+  fastify.post('/auth/register', {
+    config: {
+      rateLimit: { max: 10, timeWindow: 60_000 },
+    },
+  }, async (request, reply) => {
     const parsed = RegisterSchema.safeParse(request.body);
 
     if (!parsed.success) {
@@ -134,7 +140,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  fastify.post('/auth/login', async (request, reply) => {
+  fastify.post('/auth/login', {
+    config: {
+      rateLimit: { max: 15, timeWindow: 60_000 },
+    },
+  }, async (request, reply) => {
     const parsed = LoginSchema.safeParse(request.body);
 
     if (!parsed.success) {
@@ -154,7 +164,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
   });
 
-  fastify.post('/auth/refresh', async (request, reply) => {
+  fastify.post('/auth/refresh', {
+    config: {
+      rateLimit: { max: 20, timeWindow: 60_000 },
+    },
+  }, async (request, reply) => {
     const parsed = RefreshSchema.safeParse(request.body);
 
     if (!parsed.success) {
@@ -168,6 +182,17 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return sendSuccess(reply, { token, refreshToken, user });
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return sendError(reply, error.message, error.statusCode ?? 500);
+    }
+  });
+
+  fastify.post('/auth/google/unlink', { preHandler: authenticate }, async (request, reply) => {
+    try {
+      const { sub } = getUser(request);
+      const user = await unlinkGoogleFromUser(sub);
+      return sendSuccess(reply, { user });
     } catch (err) {
       const error = err as Error & { statusCode?: number };
       return sendError(reply, error.message, error.statusCode ?? 500);

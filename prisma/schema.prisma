@@ -24,6 +24,22 @@ enum PostStatus {
   FAILED
 }
 
+enum OutboxStatus {
+  PENDING
+  ENQUEUED
+  FAILED
+}
+
+enum AuthAuditEvent {
+  GOOGLE_LINKED
+  GOOGLE_UNLINKED
+}
+
+enum SocialConnectionStatus {
+  ACTIVE
+  INVALID
+}
+
 model Workspace {
   id        String   @id @default(cuid())
   name      String
@@ -37,6 +53,7 @@ model Workspace {
   socialConnections SocialConnection[]
   scheduledPosts    ScheduledPost[]
   assets            Asset[]
+  invites           WorkspaceInvite[]
 
   @@index([slug])
 }
@@ -57,6 +74,8 @@ model User {
   updatedAt             DateTime  @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitesAccepted WorkspaceInvite[] @relation("InviteAcceptedBy")
+  authAuditLogs   AuthAuditLog[]
 
   @@index([email])
   @@index([workspaceId])
@@ -92,6 +111,9 @@ model SocialConnection {
   accessToken  String
   refreshToken String?
   expiresAt    DateTime?
+  status       SocialConnectionStatus @default(ACTIVE)
+  invalidAt    DateTime?
+  lastCheckedAt DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -110,6 +132,7 @@ model ScheduledPost {
   hashtags     String[]
   scheduledAt  DateTime
   status       PostStatus @default(DRAFT)
+  publishJobId String?
   retryCount   Int        @default(0)
   errorMessage String?
   createdAt    DateTime   @default(now())
@@ -120,4 +143,83 @@ model ScheduledPost {
 
   @@index([workspaceId])
   @@index([scheduledAt, status])
+  @@index([publishJobId])
+}
+
+model OutboxJob {
+  id          String      @id @default(cuid())
+  queue       String
+  name        String
+  dedupeKey   String?     @unique
+  payload     Json
+  runAt       DateTime    @default(now())
+  status      OutboxStatus @default(PENDING)
+  attempts    Int         @default(0)
+  lastError   String?
+  enqueuedAt  DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status, runAt])
+}
+
+model PaymentCallbackReplay {
+  id            String   @id @default(cuid())
+  replayKey     String   @unique
+  source        String
+  conversationId String?
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime
+
+  @@index([expiresAt])
+}
+
+model PaymentTransaction {
+  id             String   @id @default(cuid())
+  conversationId String   @unique
+  workspaceId    String
+  creditAmount   Int
+  amount         Decimal  @db.Decimal(10, 2)
+  status         String
+  provider       String   @default("iyzico")
+  raw            Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([workspaceId, createdAt])
+}
+
+model WorkspaceInvite {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  email         String
+  role          Role     @default(MEMBER)
+  tokenHash     String   @unique
+  invitedById   String
+  acceptedById  String?
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  acceptedBy User?    @relation("InviteAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, email])
+  @@index([expiresAt, consumedAt])
+}
+
+model AuthAuditLog {
+  id              String         @id @default(cuid())
+  eventType       AuthAuditEvent
+  userId          String?
+  email           String
+  provider        String
+  providerSubject String?
+  metadata        Json?
+  createdAt       DateTime       @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([eventType, createdAt])
+  @@index([email, createdAt])
 }

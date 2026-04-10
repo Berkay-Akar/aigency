@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
 import jwt from '@fastify/jwt';
+import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env';
 import { healthRoutes } from './lib/health.route';
 import { authRoutes } from './modules/auth/auth.routes';
@@ -32,6 +33,16 @@ export function buildApp() {
 
   fastify.register(jwt, {
     secret: env.JWT_SECRET,
+  });
+
+  fastify.register(rateLimit, {
+    global: true,
+    max: env.RATE_LIMIT_MAX,
+    timeWindow: env.RATE_LIMIT_WINDOW_MS,
+    keyGenerator: (request) => {
+      const ua = request.headers['user-agent'] ?? 'unknown';
+      return `${request.ip}:${ua}`;
+    },
   });
 
   fastify.register(healthRoutes);

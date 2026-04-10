@@ -1,5 +1,6 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { JwtPayload } from './auth.schema';
+import { sendError } from '../../utils/response';
 
 export async function authenticate(
   request: FastifyRequest,
@@ -8,7 +9,7 @@ export async function authenticate(
   try {
     await request.jwtVerify();
   } catch {
-    reply.status(401).send({ success: false, error: 'Unauthorized' });
+    sendError(reply, 'Unauthorized', 401);
   }
 }
 
