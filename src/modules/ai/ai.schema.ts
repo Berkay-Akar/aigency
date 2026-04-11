@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isFalModelAllowedForMode } from '../../config/models';
 
 export const GenerationModeSchema = z.enum([
   'text-to-image',
@@ -29,6 +30,7 @@ export const GenerateSchema = z
     outputFormat: OutputFormatSchema.default('png'),
     imageUrls: z.array(z.string().url()).max(8).default([]),
     duration: z.union([z.literal(5), z.literal(10)]).default(5),
+    falModelId: z.string().min(1).optional(),
     platform: z.enum(['instagram', 'tiktok', 'general']).optional(),
     tone: z
       .enum(['professional', 'casual', 'humorous', 'inspirational'])
@@ -64,6 +66,16 @@ export const GenerateSchema = z
         code: z.ZodIssueCode.custom,
         message: 'imageUrls must be empty for text-to-image',
         path: ['imageUrls'],
+      });
+    }
+    if (
+      data.falModelId &&
+      !isFalModelAllowedForMode(data.mode, data.falModelId)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `falModelId is not allowed for mode "${data.mode}"`,
+        path: ['falModelId'],
       });
     }
   });

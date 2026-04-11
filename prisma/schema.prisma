@@ -40,6 +40,13 @@ enum SocialConnectionStatus {
   INVALID
 }
 
+enum GenerationJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model Workspace {
   id        String   @id @default(cuid())
   name      String
@@ -49,11 +56,12 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users             User[]
-  socialConnections SocialConnection[]
-  scheduledPosts    ScheduledPost[]
-  assets            Asset[]
-  invites           WorkspaceInvite[]
+  users              User[]
+  socialConnections  SocialConnection[]
+  scheduledPosts     ScheduledPost[]
+  assets             Asset[]
+  invites            WorkspaceInvite[]
+  aiGenerationJobs   AiGenerationJob[]
 
   @@index([slug])
 }
@@ -222,4 +230,47 @@ model AuthAuditLog {
 
   @@index([eventType, createdAt])
   @@index([email, createdAt])
+}
+
+/// One row per POST /ai/generate — full request snapshot + lifecycle for DB inspection (BullMQ remains source of runtime queue).
+model AiGenerationJob {
+  id              String               @id
+  workspaceId     String
+  userId          String
+  mode            String
+  modelTier       String
+  falModelId      String?
+  modelId         String
+  prompt          String
+  enhancePrompt   Boolean              @default(false)
+  /// Prompt actually sent to fal (after optional GPT enhance)
+  promptFinal     String?
+  aspectRatio     String
+  customWidth     Int?
+  customHeight    Int?
+  outputFormat    String
+  imageUrls       Json
+  duration        Int?
+  platform        String?
+  tone            String?
+  creditsCost     Int
+  status          GenerationJobStatus  @default(QUEUED)
+  errorMessage    String?
+  /// Public URL after upload to Cloudinary (or R2)
+  resultUrl       String?
+  /// Storage object key / Cloudinary public_id path (Asset.r2Key ile uyumlu alan)
+  storageKey      String?
+  storageProvider String               @default("cloudinary")
+  /// Geçici URL fal çıktısı (CDN)
+  falResultUrl    String?
+  assetId         String?              @unique
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  completedAt     DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([status])
+  @@index([userId])
 }

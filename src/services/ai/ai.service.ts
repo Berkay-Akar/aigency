@@ -1,7 +1,10 @@
 import { fal } from '@fal-ai/client';
 import { env } from '../../config/env';
 import type { GenerationMode } from '../../config/models';
-import { supportsKlingAspectRatio } from '../../config/models';
+import {
+  supportsKlingAspectRatio,
+  isKlingImageToVideo,
+} from '../../config/models';
 
 let falConfigured = false;
 
@@ -113,10 +116,6 @@ interface FalImagePayload {
   images?: FalImageRow[];
 }
 
-interface FalVideoPayload {
-  video?: { url: string; content_type?: string };
-}
-
 function pickImageFromData(data: unknown): FalImageRow {
   const d = data as FalImagePayload;
   const img = d.images?.[0];
@@ -127,15 +126,30 @@ function pickImageFromData(data: unknown): FalImageRow {
 }
 
 function pickVideoFromData(data: unknown): { url: string; contentType: string } {
-  const d = data as FalVideoPayload;
-  const v = d.video;
-  if (!v?.url) {
-    throw new Error('fal.ai returned no video');
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+    const video = d.video;
+    if (video && typeof video === 'object') {
+      const v = video as { url?: string; content_type?: string };
+      if (v.url) {
+        return {
+          url: v.url,
+          contentType: v.content_type ?? 'video/mp4',
+        };
+      }
+    }
+    const output = d.output;
+    if (output && typeof output === 'object') {
+      const o = output as { url?: string; content_type?: string };
+      if (o.url) {
+        return {
+          url: o.url,
+          contentType: o.content_type ?? 'video/mp4',
+        };
+      }
+    }
   }
-  return {
-    url: v.url,
-    contentType: v.content_type ?? 'video/mp4',
-  };
+  throw new Error('fal.ai returned no video');
 }
 
 async function falSubscribe<T>(modelId: string, input: Record<string, unknown>): Promise<T> {
@@ -147,6 +161,24 @@ async function falSubscribe<T>(modelId: string, input: Record<string, unknown>):
   return result.data as T;
 }
 
+function imagenStyleInput(
+  prompt: string,
+  aspectRatio: AspectRatioPreset,
+  customWidth: number | undefined,
+  customHeight: number | undefined,
+): Record<string, unknown> {
+  const ar = imagenAspectFromPreset(aspectRatio, customWidth, customHeight);
+  let p = prompt;
+  if (aspectRatio === 'custom' && customWidth && customHeight) {
+    p = `${p}\n\n(Target composition ~${customWidth}x${customHeight}px.)`;
+  }
+  return {
+    prompt: p,
+    aspect_ratio: ar,
+    num_images: 1,
+  };
+}
+
 function buildTextToImageInput(
   modelId: string,
   prompt: string,
@@ -155,17 +187,44 @@ function buildTextToImageInput(
   customHeight: number | undefined,
   outputFormat: OutputFormat,
 ): Record<string, unknown> {
+  if (modelId.includes('imagen4')) {
+    return imagenStyleInput(
+      prompt,
+      aspectRatio,
+      customWidth,
+      customHeight,
+    );
+  }
+
   if (modelId.includes('imagen3')) {
-    const ar = imagenAspectFromPreset(aspectRatio, customWidth, customHeight);
-    let p = prompt;
-    if (aspectRatio === 'custom' && customWidth && customHeight) {
-      p = `${p}\n\n(Target composition ~${customWidth}x${customHeight}px.)`;
-    }
+    return imagenStyleInput(
+      prompt,
+      aspectRatio,
+      customWidth,
+      customHeight,
+    );
+  }
+
+  if (modelId === 'fal-ai/nano-banana') {
+    return { prompt };
+  }
+
+  if (
+    modelId === 'fal-ai/nano-banana-2' ||
+    modelId === 'fal-ai/nano-banana-pro'
+  ) {
     return {
-      prompt: p,
-      aspect_ratio: ar,
+      prompt,
+      aspect_ratio: nanoAspectFromPreset(aspectRatio),
+      output_format: outputFormat,
+      resolution: '1K',
       num_images: 1,
+      limit_generations: true,
     };
+  }
+
+  if (modelId.includes('recraft')) {
+    return { prompt };
   }
 
   if (modelId.includes('flux-2-pro')) {
@@ -192,6 +251,36 @@ function buildImageToImageInput(
   aspectRatio: AspectRatioPreset,
   outputFormat: OutputFormat,
 ): Record<string, unknown> {
+  if (modelId.includes('gemini-3.1-flash-image-preview')) {
+    return {
+      prompt,
+      image_urls: imageUrls,
+      aspect_ratio: nanoAspectFromPreset(aspectRatio),
+      output_format: outputFormat,
+      resolution: '1K',
+      num_images: 1,
+      limit_generations: true,
+    };
+  }
+
+  if (modelId.includes('flux-2-pro/edit')) {
+    const image_size = fluxImageSizeFromPreset(aspectRatio);
+    return {
+      prompt,
+      image_urls: imageUrls,
+      image_size,
+      output_format: fluxOutputFormat(outputFormat),
+      enable_safety_checker: true,
+    };
+  }
+
+  if (modelId.includes('kling-image/o3')) {
+    return {
+      prompt,
+      image_urls: imageUrls,
+    };
+  }
+
   if (modelId.includes('nano-banana')) {
     return {
       prompt,
@@ -225,15 +314,39 @@ function buildImageToVideoInput(
   duration: 5 | 10,
   aspectRatio: AspectRatioPreset,
 ): Record<string, unknown> {
-  const input: Record<string, unknown> = {
+  if (isKlingImageToVideo(modelId)) {
+    const input: Record<string, unknown> = {
+      prompt,
+      image_url: imageUrl,
+      duration: String(duration),
+    };
+    if (supportsKlingAspectRatio(modelId)) {
+      input.aspect_ratio = klingAspectFromPreset(aspectRatio);
+    }
+    return input;
+  }
+
+  if (modelId.includes('pixverse')) {
+    return {
+      prompt,
+      image_url: imageUrl,
+      duration,
+    };
+  }
+
+  if (modelId.includes('sora-2') || modelId.includes('veo3.1')) {
+    return {
+      prompt,
+      image_url: imageUrl,
+      duration,
+    };
+  }
+
+  return {
     prompt,
     image_url: imageUrl,
     duration: String(duration),
   };
-  if (supportsKlingAspectRatio(modelId)) {
-    input.aspect_ratio = klingAspectFromPreset(aspectRatio);
-  }
-  return input;
 }
 
 export interface RunAiGenerationParams {

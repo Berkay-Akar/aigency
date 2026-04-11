@@ -48,6 +48,8 @@ export interface AiJobPayload {
   workspaceId: string;
   userId: string;
   mode: AiGenerationMode;
+  modelTier: string;
+  falModelId?: string;
   modelId: string;
   prompt: string;
   enhancePrompt: boolean;

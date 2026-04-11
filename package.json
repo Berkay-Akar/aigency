@@ -4,11 +4,15 @@
   "description": "Production-grade AI SaaS for social media content generation and scheduling",
   "main": "dist/server.js",
   "scripts": {
+    "postinstall": "prisma generate",
     "predev": "docker compose up -d",
-    "dev": "tsx watch src/server.ts",
-    "dev:skip-infra": "tsx watch src/server.ts",
+    "dev": "export PATH=\"$(brew --prefix node@20)/bin:$PATH\" && tsx watch src/server.ts",
+    "dev:skip-infra": "export PATH=\"$(brew --prefix node@20)/bin:$PATH\" && tsx watch src/server.ts",
+    "worker": "export PATH=\"$(brew --prefix node@20)/bin:$PATH\" && tsx watch src/workers/index.ts",
+    "worker:once": "export PATH=\"$(brew --prefix node@20)/bin:$PATH\" && tsx src/workers/index.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:worker": "node dist/workers/index.js",
     "typecheck": "tsc --noEmit",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
@@ -26,12 +30,16 @@
     "@types/bcryptjs": "^2.4.6",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.71.0",
+    "cloudinary": "^2.9.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.8.2",
     "ioredis": "^5.10.0",
     "openai": "^6.34.0",
     "prisma": "^6.19.2",
     "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=20 <23"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

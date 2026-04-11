@@ -4,9 +4,14 @@ import { z } from 'zod';
 import { authenticate, getUser } from '../auth/auth.middleware';
 import { GenerateSchema, EnhancePromptSchema } from './ai.schema';
 import { aiQueue, dispatchPendingOutboxJobs } from '../../services/queue';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { sendSuccess, sendError } from '../../utils/response';
-import { resolveModelId } from '../../config/models';
+import { env } from '../../config/env';
+import {
+  resolveFinalModelId,
+  listModelsByMode,
+} from '../../config/models';
 import { listPresetPrompts } from '../../config/preset-prompts';
 import {
   enhanceGenerationPrompt,
@@ -20,12 +25,61 @@ const JobIdParamSchema = z.object({
   jobId: z.string().min(1),
 });
 
+const GenerationListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/ai/preset-prompts',
     { preHandler: authenticate },
     async (_request, reply) => {
       return sendSuccess(reply, { presets: listPresetPrompts() });
+    },
+  );
+
+  fastify.get(
+    '/ai/models',
+    { preHandler: authenticate },
+    async (_request, reply) => {
+      return sendSuccess(reply, { models: listModelsByMode() });
+    },
+  );
+
+  fastify.get(
+    '/ai/generation-jobs',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { workspaceId } = getUser(request);
+      const parsed = GenerationListQuerySchema.safeParse(request.query);
+      if (!parsed.success) {
+        return sendError(
+          reply,
+          parsed.error.errors[0]?.message ?? 'Invalid query',
+          400,
+        );
+      }
+      const { page, limit } = parsed.data;
+      const skip = (page - 1) * limit;
+      const [jobs, total] = await Promise.all([
+        prisma.aiGenerationJob.findMany({
+          where: { workspaceId },
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take: limit,
+        }),
+        prisma.aiGenerationJob.count({ where: { workspaceId } }),
+      ]);
+      return sendSuccess(reply, {
+        jobs,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit),
+        },
+      });
     },
   );
 
@@ -93,7 +147,11 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
         data.mode === 'image-to-video' ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
 
       const jobId = randomUUID();
-      const modelId = resolveModelId(data.mode, data.modelTier);
+      const modelId = resolveFinalModelId(
+        data.mode,
+        data.modelTier,
+        data.falModelId,
+      );
 
       try {
         await prisma.$transaction(async (tx) => {
@@ -118,6 +176,30 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
             data: { credits: { decrement: cost } },
           });
 
+          await tx.aiGenerationJob.create({
+            data: {
+              id: jobId,
+              workspaceId,
+              userId,
+              mode: data.mode,
+              modelTier: data.modelTier,
+              falModelId: data.falModelId ?? null,
+              modelId,
+              prompt: data.prompt,
+              enhancePrompt: data.enhancePrompt,
+              aspectRatio: data.aspectRatio,
+              customWidth: data.customWidth,
+              customHeight: data.customHeight,
+              outputFormat: data.outputFormat,
+              imageUrls: data.imageUrls as Prisma.InputJsonValue,
+              duration: data.duration,
+              platform: data.platform ?? null,
+              tone: data.tone ?? null,
+              creditsCost: cost,
+              storageProvider: env.STORAGE_PROVIDER,
+            },
+          });
+
           await tx.outboxJob.create({
             data: {
               queue: 'ai-jobs',
@@ -128,6 +210,8 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
                 workspaceId,
                 userId,
                 mode: data.mode,
+                modelTier: data.modelTier,
+                falModelId: data.falModelId,
                 modelId,
                 prompt: data.prompt,
                 enhancePrompt: data.enhancePrompt,
@@ -178,23 +262,57 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
 
       const job = await aiQueue.getJob(jobId);
 
+      const generationJob = await prisma.aiGenerationJob.findFirst({
+        where: { id: jobId, workspaceId },
+      });
+
       if (!job) {
         const outbox = await prisma.outboxJob.findUnique({
           where: { dedupeKey: `ai-generate:${jobId}` },
         });
-        if (!outbox) {
+
+        if (!generationJob && !outbox) {
           return sendError(reply, 'Job not found', 404);
         }
-        const payload = outbox.payload as { workspaceId?: string };
-        if (payload.workspaceId !== workspaceId) {
-          return sendError(reply, 'Job not found', 404);
+
+        if (outbox) {
+          const payload = outbox.payload as { workspaceId?: string };
+          if (payload.workspaceId !== workspaceId) {
+            return sendError(reply, 'Job not found', 404);
+          }
+        }
+
+        let status: 'queued' | 'processing' | 'completed' | 'failed' = 'queued';
+        let failedReason: string | undefined;
+
+        if (outbox?.status === 'FAILED') {
+          status = 'failed';
+          failedReason = outbox.lastError ?? undefined;
+        }
+        if (generationJob) {
+          if (generationJob.status === 'FAILED') {
+            status = 'failed';
+            failedReason = generationJob.errorMessage ?? failedReason;
+          } else if (generationJob.status === 'COMPLETED') {
+            status = 'completed';
+            failedReason = undefined;
+          } else if (generationJob.status === 'PROCESSING') {
+            status = 'processing';
+          }
         }
 
         return sendSuccess(reply, {
           id: jobId,
-          status: outbox.status === 'FAILED' ? 'failed' : 'queued',
-          result: undefined,
-          failedReason: outbox.lastError ?? undefined,
+          status,
+          result:
+            generationJob?.status === 'COMPLETED' && generationJob.resultUrl
+              ? {
+                  url: generationJob.resultUrl,
+                  assetId: generationJob.assetId ?? jobId,
+                }
+              : undefined,
+          failedReason,
+          generation: generationJob ?? undefined,
         });
       }
 
@@ -227,6 +345,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
         status: normalized,
         result,
         failedReason,
+        generation: generationJob ?? undefined,
       });
     },
   );

@@ -1,4 +1,7 @@
+import dns from 'node:dns';
 import { Worker } from 'bullmq';
+
+dns.setDefaultResultOrder('ipv4first');
 import { env } from '../config/env';
 import './outbox.dispatcher';
 import './social-token-refresh.worker';
@@ -14,6 +17,7 @@ import {
   refreshConnectionIfNeeded,
 } from '../services/social';
 import { prisma } from '../lib/prisma';
+import { fetchHttpsBuffer } from '../lib/ipv4-https';
 import type { AiJobPayload, PublishJobPayload } from '../services/queue';
 
 const connection = {
@@ -59,29 +63,66 @@ export const aiWorker = new Worker<AiJobPayload>(
       job.log('[ai-worker] Prompt enhanced via GPT');
     }
 
+    await prisma.aiGenerationJob.updateMany({
+      where: { id: jobId, workspaceId },
+      data: {
+        status: 'PROCESSING',
+        promptFinal: finalPrompt,
+      },
+    });
+
     const assetType = mode === 'image-to-video' ? 'video' : 'image';
 
-    const result = await runAiGeneration({
-      mode,
-      modelId,
-      prompt: finalPrompt,
-      imageUrls,
-      aspectRatio,
-      customWidth,
-      customHeight,
-      outputFormat,
-      duration: duration ?? 5,
-    });
+    let result: Awaited<ReturnType<typeof runAiGeneration>>;
+    try {
+      result = await runAiGeneration({
+        mode,
+        modelId,
+        prompt: finalPrompt,
+        imageUrls,
+        aspectRatio,
+        customWidth,
+        customHeight,
+        outputFormat,
+        duration: duration ?? 5,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`[FAL] ${msg}`, { cause: err });
+    }
 
     job.log(`[ai-worker] Asset generated: ${result.url}`);
 
-    const assetResponse = await fetch(result.url);
-    const assetBuffer = Buffer.from(await assetResponse.arrayBuffer());
-    const ext = result.contentType.split('/')[1] ?? 'bin';
-    const r2Key = `workspaces/${workspaceId}/assets/${jobId}.${ext}`;
-    const publicUrl = await uploadFile(r2Key, assetBuffer, result.contentType);
+    await prisma.aiGenerationJob.updateMany({
+      where: { id: jobId, workspaceId },
+      data: { falResultUrl: result.url },
+    });
 
-    job.log(`[ai-worker] Uploaded to R2: ${publicUrl}`);
+    let assetBuffer: Buffer;
+    try {
+      const fetched = await fetchHttpsBuffer(result.url);
+      assetBuffer = fetched.buffer;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`[FETCH_RESULT_URL] ${result.url} — ${msg}`, {
+        cause: err,
+      });
+    }
+
+    const ext = result.contentType.split('/')[1] ?? 'bin';
+    const objectKey = `workspaces/${workspaceId}/assets/${jobId}.${ext}`;
+    let publicUrl: string;
+    let storageKey: string;
+    try {
+      const uploaded = await uploadFile(objectKey, assetBuffer, result.contentType);
+      publicUrl = uploaded.url;
+      storageKey = uploaded.storageKey;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`[STORAGE_UPLOAD] ${msg}`, { cause: err });
+    }
+
+    job.log(`[ai-worker] Uploaded (${env.STORAGE_PROVIDER}): ${publicUrl}`);
 
     const caption =
       prompt.length > 500 ? `${prompt.slice(0, 497)}...` : prompt;
@@ -93,10 +134,22 @@ export const aiWorker = new Worker<AiJobPayload>(
         jobId,
         type: assetType,
         url: publicUrl,
-        r2Key,
+        r2Key: storageKey,
         contentType: result.contentType,
         caption,
         hashtags: [],
+      },
+    });
+
+    await prisma.aiGenerationJob.updateMany({
+      where: { id: jobId, workspaceId },
+      data: {
+        status: 'COMPLETED',
+        resultUrl: publicUrl,
+        storageKey,
+        storageProvider: env.STORAGE_PROVIDER,
+        assetId: jobId,
+        completedAt: new Date(),
       },
     });
 
@@ -203,8 +256,31 @@ aiWorker.on('completed', (job) => {
   console.log(`[ai-worker] Job ${job.id} completed`);
 });
 
-aiWorker.on('failed', (job, err) => {
+aiWorker.on('failed', async (job, err) => {
+  const jobId = job?.data?.jobId as string | undefined;
   console.error(`[ai-worker] Job ${job?.id} failed: ${err.message}`);
+  if (!jobId || !job) return;
+
+  const maxAttempts = job.opts.attempts ?? 3;
+  const attemptsMade = job.attemptsMade ?? 0;
+  const isFinal = attemptsMade >= maxAttempts;
+
+  try {
+    await prisma.aiGenerationJob.updateMany({
+      where: { id: jobId },
+      data: isFinal
+        ? {
+            status: 'FAILED',
+            errorMessage: err.message.slice(0, 4000),
+            completedAt: new Date(),
+          }
+        : {
+            errorMessage: `retry ${attemptsMade}/${maxAttempts}: ${err.message.slice(0, 3500)}`,
+          },
+    });
+  } catch (e) {
+    console.error('[ai-worker] Failed to persist AiGenerationJob failure', e);
+  }
 });
 
 publishWorker.on('completed', (job) => {
