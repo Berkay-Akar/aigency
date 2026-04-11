@@ -19,7 +19,12 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().length(64),
 
   FAL_API_KEY: z.string().min(1),
-  ANTHROPIC_API_KEY: z.string().min(1),
+
+  /** Used for optional "promptumu güzelleştir" (GPT prompt enhancement) */
+  OPENAI_API_KEY: z.string().default(""),
+
+  /** Legacy; optional if unused */
+  ANTHROPIC_API_KEY: z.string().default(""),
 
   R2_ACCOUNT_ID: z.string().min(1),
   R2_ACCESS_KEY_ID: z.string().min(1),

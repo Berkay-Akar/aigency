@@ -2,8 +2,11 @@ import { Worker } from 'bullmq';
 import { env } from '../config/env';
 import './outbox.dispatcher';
 import './social-token-refresh.worker';
-import { generateImage, generateVideo } from '../services/ai';
-import { optimizePrompt } from '../services/prompt-builder';
+import { runAiGeneration } from '../services/ai';
+import {
+  enhanceGenerationPrompt,
+  isOpenAiConfigured,
+} from '../services/prompt-builder';
 import { uploadFile } from '../services/storage';
 import {
   InstagramService,
@@ -27,59 +30,73 @@ const workerOptions = {
 export const aiWorker = new Worker<AiJobPayload>(
   'ai-jobs',
   async (job) => {
-    const { jobId, workspaceId, userId, type, prompt, options = {} } = job.data;
+    const {
+      jobId,
+      workspaceId,
+      userId,
+      mode,
+      modelId,
+      prompt,
+      enhancePrompt,
+      aspectRatio,
+      customWidth,
+      customHeight,
+      outputFormat,
+      imageUrls,
+      duration,
+    } = job.data;
 
-    job.log(`[ai-worker] Starting job ${jobId} type=${type}`);
+    job.log(`[ai-worker] Starting job ${jobId} mode=${mode} model=${modelId}`);
 
-    const platform = (options.platform as 'instagram' | 'tiktok' | 'general') ?? 'general';
-    const tone = options.tone as 'professional' | 'casual' | 'humorous' | 'inspirational' | undefined;
-
-    // Step 1: Optimize prompt with Claude
-    const optimized = await optimizePrompt(prompt, { platform, tone });
-    job.log(`[ai-worker] Prompt optimized. Tokens: ${optimized.inputTokens}+${optimized.outputTokens}`);
-
-    // Step 2: Generate asset
-    let resultUrl: string;
-    let contentType: string;
-
-    if (type === 'image') {
-      const result = await generateImage(optimized.imagePrompt, {
-        width: options.width as number | undefined,
-        height: options.height as number | undefined,
-      });
-      resultUrl = result.url;
-      contentType = result.contentType;
-    } else {
-      const result = await generateVideo(optimized.imagePrompt, {
-        aspectRatio: (options.aspectRatio as '16:9' | '9:16' | '1:1') ?? '16:9',
-      });
-      resultUrl = result.url;
-      contentType = result.contentType;
+    let finalPrompt = prompt;
+    if (enhancePrompt) {
+      if (!isOpenAiConfigured()) {
+        throw new Error(
+          'enhancePrompt was true but OPENAI_API_KEY is not configured',
+        );
+      }
+      finalPrompt = await enhanceGenerationPrompt(prompt, mode);
+      job.log('[ai-worker] Prompt enhanced via GPT');
     }
 
-    job.log(`[ai-worker] Asset generated: ${resultUrl}`);
+    const assetType = mode === 'image-to-video' ? 'video' : 'image';
 
-    // Step 3: Download and re-upload to R2
-    const assetResponse = await fetch(resultUrl);
+    const result = await runAiGeneration({
+      mode,
+      modelId,
+      prompt: finalPrompt,
+      imageUrls,
+      aspectRatio,
+      customWidth,
+      customHeight,
+      outputFormat,
+      duration: duration ?? 5,
+    });
+
+    job.log(`[ai-worker] Asset generated: ${result.url}`);
+
+    const assetResponse = await fetch(result.url);
     const assetBuffer = Buffer.from(await assetResponse.arrayBuffer());
-    const ext = contentType.split('/')[1] ?? 'bin';
+    const ext = result.contentType.split('/')[1] ?? 'bin';
     const r2Key = `workspaces/${workspaceId}/assets/${jobId}.${ext}`;
-    const publicUrl = await uploadFile(r2Key, assetBuffer, contentType);
+    const publicUrl = await uploadFile(r2Key, assetBuffer, result.contentType);
 
     job.log(`[ai-worker] Uploaded to R2: ${publicUrl}`);
 
-    // Step 4: Persist Asset record in DB
+    const caption =
+      prompt.length > 500 ? `${prompt.slice(0, 497)}...` : prompt;
+
     await prisma.asset.create({
       data: {
         id: jobId,
         workspaceId,
         jobId,
-        type,
+        type: assetType,
         url: publicUrl,
         r2Key,
-        contentType,
-        caption: optimized.caption,
-        hashtags: optimized.hashtags,
+        contentType: result.contentType,
+        caption,
+        hashtags: [],
       },
     });
 
@@ -91,9 +108,9 @@ export const aiWorker = new Worker<AiJobPayload>(
       userId,
       assetId: jobId,
       assetUrl: publicUrl,
-      caption: optimized.caption,
-      hashtags: optimized.hashtags,
-      type,
+      caption,
+      hashtags: [] as string[],
+      type: assetType,
     };
   },
   workerOptions,
@@ -119,7 +136,6 @@ export const publishWorker = new Worker<PublishJobPayload>(
       return;
     }
 
-    // Resolve asset URL from DB
     const asset = await prisma.asset.findUnique({
       where: { id: post.assetId },
     });

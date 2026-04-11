@@ -4,7 +4,9 @@
   "description": "Production-grade AI SaaS for social media content generation and scheduling",
   "main": "dist/server.js",
   "scripts": {
+    "predev": "docker compose up -d",
     "dev": "tsx watch src/server.ts",
+    "dev:skip-infra": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
@@ -13,9 +15,9 @@
     "docker:logs": "docker compose logs -f redis"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.79.0",
     "@aws-sdk/client-s3": "^3.1011.0",
     "@aws-sdk/s3-request-presigner": "^3.1011.0",
+    "@fal-ai/client": "^1.9.5",
     "@fastify/cors": "^10.1.0",
     "@fastify/jwt": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
@@ -27,6 +29,7 @@
     "dotenv": "^16.4.5",
     "fastify": "^5.8.2",
     "ioredis": "^5.10.0",
+    "openai": "^6.34.0",
     "prisma": "^6.19.2",
     "zod": "^3.23.8"
   },

@@ -18,7 +18,7 @@ This backend is a Fastify + TypeScript + Prisma modular monolith for:
 - ORM: Prisma (PostgreSQL)
 - Queue: BullMQ (Redis)
 - Storage: Cloudflare R2 (S3-compatible)
-- AI: fal.ai (generation), Anthropic (prompt optimization)
+- AI: fal.ai (generation via `@fal-ai/client`), OpenAI GPT-4o-mini (optional prompt enhancement)
 - Payments: iyzico
 
 ## Base URL
@@ -66,7 +66,7 @@ flowchart LR
 
   AIModule --> Queue[RedisBullMQ]
   Queue --> Worker[Workers]
-  Worker --> Claude[AnthropicPromptBuilder]
+  Worker --> OpenAI[GPTPromptEnhancer]
   Worker --> FalAI[fal.ai]
   Worker --> R2[CloudflareR2]
   Worker --> DB[(PostgreSQLPrisma)]
@@ -179,27 +179,37 @@ All routes below require Bearer token.
 
 All routes below require Bearer token.
 
-#### POST `/ai/generate`
-- Description: queues image/video generation job and deducts credits
-- Credits:
-  - image: 10
-  - video: 50
+#### GET `/ai/preset-prompts`
+- Description: returns static preset prompts grouped by `text-to-image`, `image-to-image`, `image-to-video`
+- Response data: `{ presets: { ... } }`
+
+#### POST `/ai/enhance-prompt`
+- Description: runs GPT-4o-mini to improve a prompt (preview before generate). Requires `OPENAI_API_KEY`.
 - Body:
-  - `type`: `image | video`
-  - `prompt`: 3-1000 chars
-  - `platform`: `instagram | tiktok | general` (default `general`)
-  - `style` optional
-  - `targetAudience` optional
-  - `tone`: `professional | casual | humorous | inspirational` optional
-  - `options` optional:
-    - `width` 256-2048
-    - `height` 256-2048
-    - `numImages` 1-4
-    - `negativePrompt`
-    - `durationSeconds` 3-30
-    - `aspectRatio` `16:9 | 9:16 | 1:1`
+  - `prompt` 3-4000 chars
+  - `mode`: `text-to-image | image-to-image | image-to-video`
+- Success: `200` — `{ enhancedPrompt: string }`
+- Errors: `503` if OpenAI is not configured
+
+#### POST `/ai/generate`
+- Description: queues generation job and deducts credits (fal.ai model picked from `mode` + `modelTier`)
+- Credits:
+  - `text-to-image` / `image-to-image`: 10
+  - `image-to-video`: 50
+- Body:
+  - `mode`: `text-to-image | image-to-image | image-to-video`
+  - `modelTier`: `fast | standard | premium` (default `standard`) — maps to fal endpoints in `src/config/models.ts`
+  - `prompt`: 3-4000 chars
+  - `enhancePrompt`: boolean (default `false`) — if true, worker calls GPT before fal; requires `OPENAI_API_KEY`
+  - `aspectRatio`: `portrait | landscape | square | custom` (default `square`)
+  - `customWidth` / `customHeight`: required when `aspectRatio` is `custom` (256-2048)
+  - `outputFormat`: `png | jpeg | webp` (default `png`; image modes only — video ignores)
+  - `imageUrls`: `[]` for text-to-image; ≥1 public URL for image-to-image; ≥1 for image-to-video (first frame)
+  - `duration`: `5 | 10` (seconds, image-to-video; default `5`)
+  - `platform` / `tone`: optional (reserved for future use)
 - Success: `202`
-- Response data: `{ jobId, status: "queued", creditsCost }`
+- Response data: `{ jobId, status: "queued", creditsCost, modelId }`
+- Errors: `503` if `enhancePrompt` is true but OpenAI is not configured
 
 #### GET `/jobs/:jobId`
 - Description: fetches job status from BullMQ
@@ -353,7 +363,8 @@ All routes below require Bearer token.
 - `JWT_EXPIRES_IN`
 - `ENCRYPTION_KEY` (64 chars)
 - `FAL_API_KEY`
-- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY` (optional; required for `/ai/enhance-prompt` and for `enhancePrompt: true` on generate)
+- `ANTHROPIC_API_KEY` (optional legacy)
 - `R2_ACCOUNT_ID`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`

@@ -2,10 +2,16 @@ import { randomUUID } from 'crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { authenticate, getUser } from '../auth/auth.middleware';
-import { GenerateSchema } from './ai.schema';
+import { GenerateSchema, EnhancePromptSchema } from './ai.schema';
 import { aiQueue, dispatchPendingOutboxJobs } from '../../services/queue';
 import { prisma } from '../../lib/prisma';
 import { sendSuccess, sendError } from '../../utils/response';
+import { resolveModelId } from '../../config/models';
+import { listPresetPrompts } from '../../config/preset-prompts';
+import {
+  enhanceGenerationPrompt,
+  isOpenAiConfigured,
+} from '../../services/prompt-builder';
 
 const IMAGE_CREDIT_COST = 10;
 const VIDEO_CREDIT_COST = 50;
@@ -15,6 +21,49 @@ const JobIdParamSchema = z.object({
 });
 
 export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.get(
+    '/ai/preset-prompts',
+    { preHandler: authenticate },
+    async (_request, reply) => {
+      return sendSuccess(reply, { presets: listPresetPrompts() });
+    },
+  );
+
+  fastify.post(
+    '/ai/enhance-prompt',
+    { preHandler: authenticate },
+    async (request, reply) => {
+      if (!isOpenAiConfigured()) {
+        return sendError(
+          reply,
+          'OPENAI_API_KEY is not configured on the server',
+          503,
+        );
+      }
+
+      const parsed = EnhancePromptSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return sendError(
+          reply,
+          parsed.error.errors[0]?.message ?? 'Invalid input',
+          400,
+        );
+      }
+
+      try {
+        const enhancedPrompt = await enhanceGenerationPrompt(
+          parsed.data.prompt,
+          parsed.data.mode,
+        );
+        return sendSuccess(reply, { enhancedPrompt });
+      } catch (err) {
+        const error = err as Error;
+        fastify.log.error({ err }, 'enhance-prompt failed');
+        return sendError(reply, error.message, 502);
+      }
+    },
+  );
+
   fastify.post(
     '/ai/generate',
     { preHandler: authenticate },
@@ -22,15 +71,29 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       const parsed = GenerateSchema.safeParse(request.body);
 
       if (!parsed.success) {
-        return sendError(reply, parsed.error.errors[0]?.message ?? 'Invalid input', 400);
+        return sendError(
+          reply,
+          parsed.error.errors[0]?.message ?? 'Invalid input',
+          400,
+        );
       }
 
       const { sub: userId, workspaceId } = getUser(request);
-      const { type, prompt, platform, style, targetAudience, tone, options } = parsed.data;
+      const data = parsed.data;
 
-      const cost = type === 'image' ? IMAGE_CREDIT_COST : VIDEO_CREDIT_COST;
+      if (data.enhancePrompt && !isOpenAiConfigured()) {
+        return sendError(
+          reply,
+          'OPENAI_API_KEY is not configured; disable enhancePrompt or configure OpenAI',
+          503,
+        );
+      }
+
+      const cost =
+        data.mode === 'image-to-video' ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
 
       const jobId = randomUUID();
+      const modelId = resolveModelId(data.mode, data.modelTier);
 
       try {
         await prisma.$transaction(async (tx) => {
@@ -40,10 +103,14 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
           });
 
           if (!workspace) {
-            throw Object.assign(new Error('Workspace not found'), { statusCode: 404 });
+            throw Object.assign(new Error('Workspace not found'), {
+              statusCode: 404,
+            });
           }
           if (workspace.credits < cost) {
-            throw Object.assign(new Error('Insufficient credits'), { statusCode: 402 });
+            throw Object.assign(new Error('Insufficient credits'), {
+              statusCode: 402,
+            });
           }
 
           await tx.workspace.update({
@@ -60,9 +127,18 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
                 jobId,
                 workspaceId,
                 userId,
-                type,
-                prompt,
-                options: { platform, style, targetAudience, tone, ...options },
+                mode: data.mode,
+                modelId,
+                prompt: data.prompt,
+                enhancePrompt: data.enhancePrompt,
+                aspectRatio: data.aspectRatio,
+                customWidth: data.customWidth,
+                customHeight: data.customHeight,
+                outputFormat: data.outputFormat,
+                imageUrls: data.imageUrls,
+                duration: data.duration,
+                platform: data.platform,
+                tone: data.tone,
               },
             },
           });
@@ -74,7 +150,11 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         await dispatchPendingOutboxJobs(20);
-        return sendSuccess(reply, { jobId, status: 'queued', creditsCost: cost }, 202);
+        return sendSuccess(
+          reply,
+          { jobId, status: 'queued', creditsCost: cost, modelId },
+          202,
+        );
       } catch (err) {
         const error = err as Error;
         fastify.log.error({ err, jobId }, 'Failed to enqueue AI job');
@@ -118,7 +198,6 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
         });
       }
 
-      // Verify this job belongs to the requesting workspace
       const payload = job.data as { workspaceId?: string };
       if (payload.workspaceId !== workspaceId) {
         return sendError(reply, 'Job not found', 404);
@@ -134,7 +213,10 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
 
       const result =
         normalized === 'completed' && job.returnvalue
-          ? { url: (job.returnvalue as { assetUrl?: string }).assetUrl, assetId: (job.returnvalue as { assetId?: string }).assetId }
+          ? {
+              url: (job.returnvalue as { assetUrl?: string }).assetUrl,
+              assetId: (job.returnvalue as { assetId?: string }).assetId,
+            }
           : undefined;
 
       const failedReason =

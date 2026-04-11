@@ -1,3 +1,3 @@
 export { aiRoutes } from './ai.routes';
 export { assetRoutes } from './asset.routes';
-export type { GenerateInput } from './ai.schema';
+export type { GenerateInput, EnhancePromptInput } from './ai.schema';

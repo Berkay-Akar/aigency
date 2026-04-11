@@ -1,2 +1,4 @@
-export { optimizePrompt } from './prompt-builder.service';
-export type { PromptContext, OptimizedPrompt } from './prompt-builder.service';
+export {
+  enhanceGenerationPrompt,
+  isOpenAiConfigured,
+} from './prompt-builder.service';
