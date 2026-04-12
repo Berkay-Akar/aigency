@@ -47,6 +47,40 @@ enum GenerationJobStatus {
   FAILED
 }
 
+enum GenerationJobType {
+  MODEL_PHOTO
+  PRODUCT_STUDIO
+  PRODUCT_SCENE_REFERENCE
+  PRODUCT_SWAP
+  GHOST_MANNEQUIN
+  PHOTO_TO_VIDEO
+  CUSTOM
+}
+
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  CANCELLED
+  EXPIRED
+  PAST_DUE
+}
+
+enum CreditLedgerType {
+  PURCHASE
+  GENERATION
+  REFUND
+  BONUS
+  SUBSCRIPTION_GRANT
+  ADMIN_ADJUSTMENT
+}
+
 model Workspace {
   id        String   @id @default(cuid())
   name      String
@@ -56,12 +90,15 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users              User[]
-  socialConnections  SocialConnection[]
-  scheduledPosts     ScheduledPost[]
-  assets             Asset[]
-  invites            WorkspaceInvite[]
-  aiGenerationJobs   AiGenerationJob[]
+  users             User[]
+  socialConnections SocialConnection[]
+  scheduledPosts    ScheduledPost[]
+  assets            Asset[]
+  invites           WorkspaceInvite[]
+  aiGenerationJobs  AiGenerationJob[]
+  subscription      Subscription?
+  creditLedger      CreditLedger[]
+  discoverPosts     DiscoverPost[]
 
   @@index([slug])
 }
@@ -81,7 +118,7 @@ model User {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   invitesAccepted WorkspaceInvite[] @relation("InviteAcceptedBy")
   authAuditLogs   AuthAuditLog[]
 
@@ -104,26 +141,27 @@ model Asset {
 
   workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   scheduledPosts ScheduledPost[]
+  discoverPost   DiscoverPost?
 
   @@index([workspaceId])
   @@index([jobId])
 }
 
 model SocialConnection {
-  id           String    @id @default(cuid())
-  workspaceId  String
-  platform     Platform
-  accountId    String
-  accountName  String
+  id            String                 @id @default(cuid())
+  workspaceId   String
+  platform      Platform
+  accountId     String
+  accountName   String
   // AES-256-GCM encrypted: iv:authTag:ciphertext (base64)
-  accessToken  String
-  refreshToken String?
-  expiresAt    DateTime?
-  status       SocialConnectionStatus @default(ACTIVE)
-  invalidAt    DateTime?
+  accessToken   String
+  refreshToken  String?
+  expiresAt     DateTime?
+  status        SocialConnectionStatus @default(ACTIVE)
+  invalidAt     DateTime?
   lastCheckedAt DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -155,29 +193,29 @@ model ScheduledPost {
 }
 
 model OutboxJob {
-  id          String      @id @default(cuid())
-  queue       String
-  name        String
-  dedupeKey   String?     @unique
-  payload     Json
-  runAt       DateTime    @default(now())
-  status      OutboxStatus @default(PENDING)
-  attempts    Int         @default(0)
-  lastError   String?
-  enqueuedAt  DateTime?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  id         String       @id @default(cuid())
+  queue      String
+  name       String
+  dedupeKey  String?      @unique
+  payload    Json
+  runAt      DateTime     @default(now())
+  status     OutboxStatus @default(PENDING)
+  attempts   Int          @default(0)
+  lastError  String?
+  enqueuedAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
   @@index([status, runAt])
 }
 
 model PaymentCallbackReplay {
-  id            String   @id @default(cuid())
-  replayKey     String   @unique
-  source        String
+  id             String   @id @default(cuid())
+  replayKey      String   @unique
+  source         String
   conversationId String?
-  createdAt     DateTime @default(now())
-  expiresAt     DateTime
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
 
   @@index([expiresAt])
 }
@@ -198,19 +236,19 @@ model PaymentTransaction {
 }
 
 model WorkspaceInvite {
-  id            String   @id @default(cuid())
-  workspaceId   String
-  email         String
-  role          Role     @default(MEMBER)
-  tokenHash     String   @unique
-  invitedById   String
-  acceptedById  String?
-  expiresAt     DateTime
-  consumedAt    DateTime?
-  createdAt     DateTime @default(now())
+  id           String    @id @default(cuid())
+  workspaceId  String
+  email        String
+  role         Role      @default(MEMBER)
+  tokenHash    String    @unique
+  invitedById  String
+  acceptedById String?
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  createdAt    DateTime  @default(now())
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  acceptedBy User?    @relation("InviteAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  acceptedBy User?     @relation("InviteAcceptedBy", fields: [acceptedById], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, email])
   @@index([expiresAt, consumedAt])
@@ -234,7 +272,7 @@ model AuthAuditLog {
 
 /// One row per POST /ai/generate — full request snapshot + lifecycle for DB inspection (BullMQ remains source of runtime queue).
 model AiGenerationJob {
-  id              String               @id
+  id              String              @id
   workspaceId     String
   userId          String
   mode            String
@@ -242,7 +280,7 @@ model AiGenerationJob {
   falModelId      String?
   modelId         String
   prompt          String
-  enhancePrompt   Boolean              @default(false)
+  enhancePrompt   Boolean             @default(false)
   /// Prompt actually sent to fal (after optional GPT enhance)
   promptFinal     String?
   aspectRatio     String
@@ -253,19 +291,25 @@ model AiGenerationJob {
   duration        Int?
   platform        String?
   tone            String?
+  /// Model descriptor selections for model-photo jobs (JSON snapshot)
+  modelDetails    Json?
+  /// Customization settings for model-photo jobs (JSON snapshot)
+  customization   Json?
+  /// Categorises what kind of generation this job represents
+  jobType         GenerationJobType?
   creditsCost     Int
-  status          GenerationJobStatus  @default(QUEUED)
+  status          GenerationJobStatus @default(QUEUED)
   errorMessage    String?
   /// Public URL after upload to Cloudinary (or R2)
   resultUrl       String?
   /// Storage object key / Cloudinary public_id path (Asset.r2Key ile uyumlu alan)
   storageKey      String?
-  storageProvider String               @default("cloudinary")
+  storageProvider String              @default("cloudinary")
   /// Geçici URL fal çıktısı (CDN)
   falResultUrl    String?
-  assetId         String?              @unique
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  assetId         String?             @unique
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
   completedAt     DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -273,4 +317,80 @@ model AiGenerationJob {
   @@index([workspaceId, createdAt])
   @@index([status])
   @@index([userId])
+}
+
+// ─── Subscription ─────────────────────────────────────────────────────────────
+
+/// One row per workspace; tracks the active subscription plan and iyzico provider IDs.
+model Subscription {
+  id                     String             @id @default(cuid())
+  workspaceId            String             @unique
+  plan                   SubscriptionPlan
+  status                 SubscriptionStatus
+  monthlyCredits         Int
+  currentPeriodStart     DateTime
+  currentPeriodEnd       DateTime
+  trialEndsAt            DateTime?
+  cancelledAt            DateTime?
+  /// iyzico price/plan ID
+  providerPlanId         String?
+  /// iyzico subscription/reference ID
+  providerSubscriptionId String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([status, currentPeriodEnd])
+}
+
+// ─── CreditLedger ─────────────────────────────────────────────────────────────
+
+/// Immutable audit log of every credit change for a workspace.
+/// amount > 0 = credits added; amount < 0 = credits consumed.
+model CreditLedger {
+  id           String           @id @default(cuid())
+  workspaceId  String
+  /// The user who triggered the transaction (null for system/automated events)
+  userId       String?
+  amount       Int
+  type         CreditLedgerType
+  description  String?
+  /// External reference: jobId, paymentTransactionId, subscriptionId, etc.
+  referenceId  String?
+  /// Workspace.credits value immediately after this transaction
+  balanceAfter Int
+  createdAt    DateTime         @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([type, createdAt])
+}
+
+// ─── DiscoverPost ─────────────────────────────────────────────────────────────
+
+/// A user-shared generation visible on the public Explore/Discover feed.
+model DiscoverPost {
+  id          String            @id @default(cuid())
+  /// One-to-one: each asset can be shared at most once
+  assetId     String            @unique
+  workspaceId String
+  userId      String
+  jobType     GenerationJobType
+  imageUrl    String
+  tags        String[]
+  isPublic    Boolean           @default(false)
+  isFeatured  Boolean           @default(false)
+  viewCount   Int               @default(0)
+  likeCount   Int               @default(0)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  asset     Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([isPublic, createdAt])
+  @@index([isFeatured])
+  @@index([workspaceId, createdAt])
 }

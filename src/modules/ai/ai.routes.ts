@@ -1,22 +1,19 @@
-import { randomUUID } from 'crypto';
-import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
-import { authenticate, getUser } from '../auth/auth.middleware';
-import { GenerateSchema, EnhancePromptSchema } from './ai.schema';
-import { aiQueue, dispatchPendingOutboxJobs } from '../../services/queue';
-import { Prisma } from '@prisma/client';
-import { prisma } from '../../lib/prisma';
-import { sendSuccess, sendError } from '../../utils/response';
-import { env } from '../../config/env';
-import {
-  resolveFinalModelId,
-  listModelsByMode,
-} from '../../config/models';
-import { listPresetPrompts } from '../../config/preset-prompts';
+import { randomUUID } from "crypto";
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { authenticate, getUser } from "../auth/auth.middleware";
+import { GenerateSchema, EnhancePromptSchema } from "./ai.schema";
+import { aiQueue, dispatchPendingOutboxJobs } from "../../services/queue";
+import { Prisma } from "@prisma/client";
+import { prisma } from "../../lib/prisma";
+import { sendSuccess, sendError } from "../../utils/response";
+import { env } from "../../config/env";
+import { resolveFinalModelId, listModelsByMode } from "../../config/models";
+import { listPresetPrompts } from "../../config/preset-prompts";
 import {
   enhanceGenerationPrompt,
   isOpenAiConfigured,
-} from '../../services/prompt-builder';
+} from "../../services/prompt-builder";
 
 const IMAGE_CREDIT_COST = 10;
 const VIDEO_CREDIT_COST = 50;
@@ -32,7 +29,7 @@ const GenerationListQuerySchema = z.object({
 
 export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
-    '/ai/preset-prompts',
+    "/ai/preset-prompts",
     { preHandler: authenticate },
     async (_request, reply) => {
       return sendSuccess(reply, { presets: listPresetPrompts() });
@@ -40,7 +37,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   fastify.get(
-    '/ai/models',
+    "/ai/models",
     { preHandler: authenticate },
     async (_request, reply) => {
       return sendSuccess(reply, { models: listModelsByMode() });
@@ -48,7 +45,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   fastify.get(
-    '/ai/generation-jobs',
+    "/ai/generation-jobs",
     { preHandler: authenticate },
     async (request, reply) => {
       const { workspaceId } = getUser(request);
@@ -56,7 +53,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (!parsed.success) {
         return sendError(
           reply,
-          parsed.error.errors[0]?.message ?? 'Invalid query',
+          parsed.error.errors[0]?.message ?? "Invalid query",
           400,
         );
       }
@@ -65,7 +62,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       const [jobs, total] = await Promise.all([
         prisma.aiGenerationJob.findMany({
           where: { workspaceId },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           skip,
           take: limit,
         }),
@@ -84,13 +81,13 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   fastify.post(
-    '/ai/enhance-prompt',
+    "/ai/enhance-prompt",
     { preHandler: authenticate },
     async (request, reply) => {
       if (!isOpenAiConfigured()) {
         return sendError(
           reply,
-          'OPENAI_API_KEY is not configured on the server',
+          "OPENAI_API_KEY is not configured on the server",
           503,
         );
       }
@@ -99,7 +96,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (!parsed.success) {
         return sendError(
           reply,
-          parsed.error.errors[0]?.message ?? 'Invalid input',
+          parsed.error.errors[0]?.message ?? "Invalid input",
           400,
         );
       }
@@ -112,14 +109,14 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
         return sendSuccess(reply, { enhancedPrompt });
       } catch (err) {
         const error = err as Error;
-        fastify.log.error({ err }, 'enhance-prompt failed');
+        fastify.log.error({ err }, "enhance-prompt failed");
         return sendError(reply, error.message, 502);
       }
     },
   );
 
   fastify.post(
-    '/ai/generate',
+    "/ai/generate",
     { preHandler: authenticate },
     async (request, reply) => {
       const parsed = GenerateSchema.safeParse(request.body);
@@ -127,7 +124,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (!parsed.success) {
         return sendError(
           reply,
-          parsed.error.errors[0]?.message ?? 'Invalid input',
+          parsed.error.errors[0]?.message ?? "Invalid input",
           400,
         );
       }
@@ -138,13 +135,13 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
       if (data.enhancePrompt && !isOpenAiConfigured()) {
         return sendError(
           reply,
-          'OPENAI_API_KEY is not configured; disable enhancePrompt or configure OpenAI',
+          "OPENAI_API_KEY is not configured; disable enhancePrompt or configure OpenAI",
           503,
         );
       }
 
       const cost =
-        data.mode === 'image-to-video' ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
+        data.mode === "image-to-video" ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
 
       const jobId = randomUUID();
       const modelId = resolveFinalModelId(
@@ -161,12 +158,12 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
           });
 
           if (!workspace) {
-            throw Object.assign(new Error('Workspace not found'), {
+            throw Object.assign(new Error("Workspace not found"), {
               statusCode: 404,
             });
           }
           if (workspace.credits < cost) {
-            throw Object.assign(new Error('Insufficient credits'), {
+            throw Object.assign(new Error("Insufficient credits"), {
               statusCode: 402,
             });
           }
@@ -195,6 +192,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
               duration: data.duration,
               platform: data.platform ?? null,
               tone: data.tone ?? null,
+              jobType: "CUSTOM",
               creditsCost: cost,
               storageProvider: env.STORAGE_PROVIDER,
             },
@@ -202,8 +200,8 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
 
           await tx.outboxJob.create({
             data: {
-              queue: 'ai-jobs',
-              name: 'generate',
+              queue: "ai-jobs",
+              name: "generate",
               dedupeKey: `ai-generate:${jobId}`,
               payload: {
                 jobId,
@@ -236,26 +234,26 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
         await dispatchPendingOutboxJobs(20);
         return sendSuccess(
           reply,
-          { jobId, status: 'queued', creditsCost: cost, modelId },
+          { jobId, status: "queued", creditsCost: cost, modelId },
           202,
         );
       } catch (err) {
         const error = err as Error;
-        fastify.log.error({ err, jobId }, 'Failed to enqueue AI job');
+        fastify.log.error({ err, jobId }, "Failed to enqueue AI job");
         return sendError(reply, error.message, 500);
       }
     },
   );
 
   fastify.get(
-    '/jobs/:jobId',
+    "/jobs/:jobId",
     { preHandler: authenticate },
     async (request, reply) => {
       const { workspaceId } = getUser(request);
       const paramsParsed = JobIdParamSchema.safeParse(request.params);
 
       if (!paramsParsed.success) {
-        return sendError(reply, 'Invalid jobId', 400);
+        return sendError(reply, "Invalid jobId", 400);
       }
 
       const { jobId } = paramsParsed.data;
@@ -272,32 +270,32 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
         });
 
         if (!generationJob && !outbox) {
-          return sendError(reply, 'Job not found', 404);
+          return sendError(reply, "Job not found", 404);
         }
 
         if (outbox) {
           const payload = outbox.payload as { workspaceId?: string };
           if (payload.workspaceId !== workspaceId) {
-            return sendError(reply, 'Job not found', 404);
+            return sendError(reply, "Job not found", 404);
           }
         }
 
-        let status: 'queued' | 'processing' | 'completed' | 'failed' = 'queued';
+        let status: "queued" | "processing" | "completed" | "failed" = "queued";
         let failedReason: string | undefined;
 
-        if (outbox?.status === 'FAILED') {
-          status = 'failed';
+        if (outbox?.status === "FAILED") {
+          status = "failed";
           failedReason = outbox.lastError ?? undefined;
         }
         if (generationJob) {
-          if (generationJob.status === 'FAILED') {
-            status = 'failed';
+          if (generationJob.status === "FAILED") {
+            status = "failed";
             failedReason = generationJob.errorMessage ?? failedReason;
-          } else if (generationJob.status === 'COMPLETED') {
-            status = 'completed';
+          } else if (generationJob.status === "COMPLETED") {
+            status = "completed";
             failedReason = undefined;
-          } else if (generationJob.status === 'PROCESSING') {
-            status = 'processing';
+          } else if (generationJob.status === "PROCESSING") {
+            status = "processing";
           }
         }
 
@@ -305,7 +303,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
           id: jobId,
           status,
           result:
-            generationJob?.status === 'COMPLETED' && generationJob.resultUrl
+            generationJob?.status === "COMPLETED" && generationJob.resultUrl
               ? {
                   url: generationJob.resultUrl,
                   assetId: generationJob.assetId ?? jobId,
@@ -318,19 +316,22 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
 
       const payload = job.data as { workspaceId?: string };
       if (payload.workspaceId !== workspaceId) {
-        return sendError(reply, 'Job not found', 404);
+        return sendError(reply, "Job not found", 404);
       }
 
       const state = await job.getState();
 
       const normalized =
-        state === 'waiting' || state === 'delayed' ? 'queued'
-        : state === 'active' ? 'processing'
-        : state === 'completed' ? 'completed'
-        : 'failed';
+        state === "waiting" || state === "delayed"
+          ? "queued"
+          : state === "active"
+            ? "processing"
+            : state === "completed"
+              ? "completed"
+              : "failed";
 
       const result =
-        normalized === 'completed' && job.returnvalue
+        normalized === "completed" && job.returnvalue
           ? {
               url: (job.returnvalue as { assetUrl?: string }).assetUrl,
               assetId: (job.returnvalue as { assetId?: string }).assetId,
@@ -338,7 +339,7 @@ export async function aiRoutes(fastify: FastifyInstance): Promise<void> {
           : undefined;
 
       const failedReason =
-        normalized === 'failed' ? job.failedReason : undefined;
+        normalized === "failed" ? job.failedReason : undefined;
 
       return sendSuccess(reply, {
         id: jobId,

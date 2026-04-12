@@ -1,3 +1,15 @@
-export { aiRoutes } from './ai.routes';
-export { assetRoutes } from './asset.routes';
-export type { GenerateInput, EnhancePromptInput } from './ai.schema';
+export { aiRoutes } from "./ai.routes";
+export { assetRoutes } from "./asset.routes";
+export { modelPhotoRoutes } from "./model-photo.routes";
+export { productAnglesRoutes } from "./product-angles.routes";
+export { productReferenceRoutes } from "./product-reference.routes";
+export { productSwapRoutes } from "./product-swap.routes";
+export { photoToVideoRoutes } from "./photo-to-video.routes";
+export { ghostMannequinRoutes } from "./ghost-mannequin.routes";
+export type { GenerateInput, EnhancePromptInput } from "./ai.schema";
+export type { ModelPhotoInput } from "./model-photo.schema";
+export type { ProductAnglesInput } from "./product-angles.schema";
+export type { ProductReferenceInput } from "./product-reference.schema";
+export type { ProductSwapInput } from "./product-swap.schema";
+export type { PhotoToVideoInput } from "./photo-to-video.schema";
+export type { GhostMannequinInput } from "./ghost-mannequin.schema";

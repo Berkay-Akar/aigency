@@ -1,8 +1,8 @@
-import { Queue } from 'bullmq';
-import type { OutboxStatus } from '@prisma/client';
-import { Prisma } from '@prisma/client';
-import { env } from '../../config/env';
-import { prisma } from '../../lib/prisma';
+import { Queue } from "bullmq";
+import type { OutboxStatus } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { env } from "../../config/env";
+import { prisma } from "../../lib/prisma";
 
 const connection = {
   host: new URL(env.REDIS_URL).hostname,
@@ -10,38 +10,39 @@ const connection = {
   password: new URL(env.REDIS_URL).password || undefined,
 };
 
-export const aiQueue = new Queue('ai-jobs', {
+export const aiQueue = new Queue("ai-jobs", {
   connection,
   defaultJobOptions: {
     attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
+    backoff: { type: "exponential", delay: 5000 },
     removeOnComplete: 100,
     removeOnFail: 200,
   },
 });
 
-export const publishQueue = new Queue('publish-jobs', {
+export const publishQueue = new Queue("publish-jobs", {
   connection,
   defaultJobOptions: {
     attempts: 3,
-    backoff: { type: 'exponential', delay: 5000 },
+    backoff: { type: "exponential", delay: 5000 },
     removeOnComplete: 100,
     removeOnFail: 200,
   },
 });
 
 export type AiGenerationMode =
-  | 'text-to-image'
-  | 'image-to-image'
-  | 'image-to-video';
+  | "text-to-image"
+  | "image-to-image"
+  | "image-to-video"
+  | "ghost-mannequin";
 
 export type AiAspectRatioPreset =
-  | 'portrait'
-  | 'landscape'
-  | 'square'
-  | 'custom';
+  | "portrait"
+  | "landscape"
+  | "square"
+  | "custom";
 
-export type AiOutputFormat = 'png' | 'jpeg' | 'webp';
+export type AiOutputFormat = "png" | "jpeg" | "webp";
 
 export interface AiJobPayload {
   jobId: string;
@@ -59,8 +60,12 @@ export interface AiJobPayload {
   outputFormat: AiOutputFormat;
   imageUrls: string[];
   duration: 5 | 10;
-  platform?: 'instagram' | 'tiktok' | 'general';
-  tone?: 'professional' | 'casual' | 'humorous' | 'inspirational';
+  platform?: "instagram" | "tiktok" | "general";
+  tone?: "professional" | "casual" | "humorous" | "inspirational";
+  /** ghost-mannequin: 'standard' (1 fal call) or 'premium' (bg-remove + ghost edit) */
+  quality?: "standard" | "premium";
+  /** ghost-mannequin: background color string interpolated in the prompt */
+  backgroundColor?: string;
 }
 
 export interface PublishJobPayload {
@@ -69,15 +74,15 @@ export interface PublishJobPayload {
 }
 
 export interface OutboxCreateInput {
-  queue: 'ai-jobs' | 'publish-jobs';
-  name: 'generate' | 'publish';
+  queue: "ai-jobs" | "publish-jobs";
+  name: "generate" | "publish";
   dedupeKey?: string;
   payload: Record<string, unknown>;
   runAt?: Date;
 }
 
 export async function addAiJob(payload: AiJobPayload): Promise<string> {
-  const job = await aiQueue.add('generate', payload, {
+  const job = await aiQueue.add("generate", payload, {
     jobId: payload.jobId,
   });
   return job.id ?? payload.jobId;
@@ -87,7 +92,7 @@ export async function addPublishJob(
   payload: PublishJobPayload,
   delayMs = 0,
 ): Promise<string> {
-  const job = await publishQueue.add('publish', payload, {
+  const job = await publishQueue.add("publish", payload, {
     delay: delayMs,
     jobId: `publish-${payload.scheduledPostId}`,
   });
@@ -101,7 +106,9 @@ export async function removePublishJobById(jobId: string): Promise<void> {
   }
 }
 
-export async function createOutboxJob(input: OutboxCreateInput): Promise<string> {
+export async function createOutboxJob(
+  input: OutboxCreateInput,
+): Promise<string> {
   const record = await prisma.outboxJob.create({
     data: {
       queue: input.queue,
@@ -124,8 +131,8 @@ async function markOutbox(
     data: {
       status,
       lastError,
-      attempts: { increment: status === 'FAILED' ? 1 : 0 },
-      enqueuedAt: status === 'ENQUEUED' ? new Date() : undefined,
+      attempts: { increment: status === "FAILED" ? 1 : 0 },
+      enqueuedAt: status === "ENQUEUED" ? new Date() : undefined,
     },
   });
 }
@@ -134,30 +141,32 @@ export async function dispatchOutboxJob(id: string): Promise<void> {
   const job = await prisma.outboxJob.findUnique({
     where: { id },
   });
-  if (!job || job.status !== 'PENDING') return;
+  if (!job || job.status !== "PENDING") return;
 
   try {
-    if (job.queue === 'ai-jobs' && job.name === 'generate') {
+    if (job.queue === "ai-jobs" && job.name === "generate") {
       await addAiJob(job.payload as unknown as AiJobPayload);
-    } else if (job.queue === 'publish-jobs' && job.name === 'publish') {
+    } else if (job.queue === "publish-jobs" && job.name === "publish") {
       const payload = job.payload as unknown as PublishJobPayload;
       const delayMs = Math.max(0, job.runAt.getTime() - Date.now());
       await addPublishJob(payload, delayMs);
     } else {
-      throw new Error(`Unsupported outbox queue/name: ${job.queue}/${job.name}`);
+      throw new Error(
+        `Unsupported outbox queue/name: ${job.queue}/${job.name}`,
+      );
     }
-    await markOutbox(job.id, 'ENQUEUED');
+    await markOutbox(job.id, "ENQUEUED");
   } catch (err) {
     const error = err as Error;
-    await markOutbox(job.id, 'FAILED', error.message);
+    await markOutbox(job.id, "FAILED", error.message);
     throw err;
   }
 }
 
 export async function dispatchPendingOutboxJobs(limit = 50): Promise<number> {
   const jobs = await prisma.outboxJob.findMany({
-    where: { status: 'PENDING', runAt: { lte: new Date() } },
-    orderBy: { runAt: 'asc' },
+    where: { status: "PENDING", runAt: { lte: new Date() } },
+    orderBy: { runAt: "asc" },
     take: limit,
   });
   for (const job of jobs) {

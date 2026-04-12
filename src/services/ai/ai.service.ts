@@ -1,10 +1,10 @@
-import { fal } from '@fal-ai/client';
-import { env } from '../../config/env';
-import type { GenerationMode } from '../../config/models';
+import { fal } from "@fal-ai/client";
+import { env } from "../../config/env";
+import type { GenerationMode } from "../../config/models";
 import {
   supportsKlingAspectRatio,
   isKlingImageToVideo,
-} from '../../config/models';
+} from "../../config/models";
 
 let falConfigured = false;
 
@@ -15,12 +15,12 @@ function ensureFalConfigured(): void {
   }
 }
 
-export type AspectRatioPreset = 'portrait' | 'landscape' | 'square' | 'custom';
-export type OutputFormat = 'png' | 'jpeg' | 'webp';
+export type AspectRatioPreset = "portrait" | "landscape" | "square" | "custom";
+export type OutputFormat = "png" | "jpeg" | "webp";
 
 export interface AiGenerationResult {
   url: string;
-  status: 'completed';
+  status: "completed";
   width?: number;
   height?: number;
   contentType: string;
@@ -30,19 +30,22 @@ function imagenAspectFromPreset(
   preset: AspectRatioPreset,
   customWidth?: number,
   customHeight?: number,
-): '1:1' | '16:9' | '9:16' | '4:3' | '3:4' {
-  if (preset === 'portrait') return '9:16';
-  if (preset === 'landscape') return '16:9';
-  if (preset === 'square') return '1:1';
+): "1:1" | "16:9" | "9:16" | "4:3" | "3:4" {
+  if (preset === "portrait") return "9:16";
+  if (preset === "landscape") return "16:9";
+  if (preset === "square") return "1:1";
   const w = customWidth ?? 1024;
   const h = customHeight ?? 1024;
   const r = w / h;
-  const candidates: Array<{ v: '1:1' | '16:9' | '9:16' | '4:3' | '3:4'; ratio: number }> = [
-    { v: '1:1', ratio: 1 },
-    { v: '16:9', ratio: 16 / 9 },
-    { v: '9:16', ratio: 9 / 16 },
-    { v: '4:3', ratio: 4 / 3 },
-    { v: '3:4', ratio: 3 / 4 },
+  const candidates: Array<{
+    v: "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
+    ratio: number;
+  }> = [
+    { v: "1:1", ratio: 1 },
+    { v: "16:9", ratio: 16 / 9 },
+    { v: "9:16", ratio: 9 / 16 },
+    { v: "4:3", ratio: 4 / 3 },
+    { v: "3:4", ratio: 3 / 4 },
   ];
   let best = candidates[0]!;
   let bestDiff = Math.abs(r - best.ratio);
@@ -57,17 +60,17 @@ function imagenAspectFromPreset(
 }
 
 function kontextAspectFromPreset(preset: AspectRatioPreset): string {
-  if (preset === 'portrait') return '9:16';
-  if (preset === 'landscape') return '16:9';
-  if (preset === 'square') return '1:1';
-  return '16:9';
+  if (preset === "portrait") return "9:16";
+  if (preset === "landscape") return "16:9";
+  if (preset === "square") return "1:1";
+  return "16:9";
 }
 
 function nanoAspectFromPreset(preset: AspectRatioPreset): string {
-  if (preset === 'custom') return 'auto';
-  if (preset === 'portrait') return '9:16';
-  if (preset === 'landscape') return '16:9';
-  return '1:1';
+  if (preset === "custom") return "auto";
+  if (preset === "portrait") return "9:16";
+  if (preset === "landscape") return "16:9";
+  return "1:1";
 }
 
 function fluxImageSizeFromPreset(
@@ -75,34 +78,34 @@ function fluxImageSizeFromPreset(
   customWidth?: number,
   customHeight?: number,
 ):
-  | 'square_hd'
-  | 'square'
-  | 'portrait_4_3'
-  | 'portrait_16_9'
-  | 'landscape_4_3'
-  | 'landscape_16_9'
+  | "square_hd"
+  | "square"
+  | "portrait_4_3"
+  | "portrait_16_9"
+  | "landscape_4_3"
+  | "landscape_16_9"
   | { width: number; height: number } {
-  if (preset === 'custom' && customWidth != null && customHeight != null) {
+  if (preset === "custom" && customWidth != null && customHeight != null) {
     return {
       width: Math.min(2048, Math.max(256, customWidth)),
       height: Math.min(2048, Math.max(256, customHeight)),
     };
   }
-  if (preset === 'portrait') return 'portrait_16_9';
-  if (preset === 'landscape') return 'landscape_16_9';
-  return 'square_hd';
+  if (preset === "portrait") return "portrait_16_9";
+  if (preset === "landscape") return "landscape_16_9";
+  return "square_hd";
 }
 
-function fluxOutputFormat(fmt: OutputFormat): 'jpeg' | 'png' {
-  return fmt === 'png' ? 'png' : 'jpeg';
+function fluxOutputFormat(fmt: OutputFormat): "jpeg" | "png" {
+  return fmt === "png" ? "png" : "jpeg";
 }
 
 function klingAspectFromPreset(
   preset: AspectRatioPreset,
-): '16:9' | '9:16' | '1:1' {
-  if (preset === 'portrait') return '9:16';
-  if (preset === 'landscape') return '16:9';
-  return '1:1';
+): "16:9" | "9:16" | "1:1" {
+  if (preset === "portrait") return "9:16";
+  if (preset === "landscape") return "16:9";
+  return "1:1";
 }
 
 interface FalImageRow {
@@ -120,39 +123,45 @@ function pickImageFromData(data: unknown): FalImageRow {
   const d = data as FalImagePayload;
   const img = d.images?.[0];
   if (!img?.url) {
-    throw new Error('fal.ai returned no images');
+    throw new Error("fal.ai returned no images");
   }
   return img;
 }
 
-function pickVideoFromData(data: unknown): { url: string; contentType: string } {
-  if (data && typeof data === 'object') {
+function pickVideoFromData(data: unknown): {
+  url: string;
+  contentType: string;
+} {
+  if (data && typeof data === "object") {
     const d = data as Record<string, unknown>;
     const video = d.video;
-    if (video && typeof video === 'object') {
+    if (video && typeof video === "object") {
       const v = video as { url?: string; content_type?: string };
       if (v.url) {
         return {
           url: v.url,
-          contentType: v.content_type ?? 'video/mp4',
+          contentType: v.content_type ?? "video/mp4",
         };
       }
     }
     const output = d.output;
-    if (output && typeof output === 'object') {
+    if (output && typeof output === "object") {
       const o = output as { url?: string; content_type?: string };
       if (o.url) {
         return {
           url: o.url,
-          contentType: o.content_type ?? 'video/mp4',
+          contentType: o.content_type ?? "video/mp4",
         };
       }
     }
   }
-  throw new Error('fal.ai returned no video');
+  throw new Error("fal.ai returned no video");
 }
 
-async function falSubscribe<T>(modelId: string, input: Record<string, unknown>): Promise<T> {
+async function falSubscribe<T>(
+  modelId: string,
+  input: Record<string, unknown>,
+): Promise<T> {
   ensureFalConfigured();
   const result = await fal.subscribe(modelId, {
     input,
@@ -169,7 +178,7 @@ function imagenStyleInput(
 ): Record<string, unknown> {
   const ar = imagenAspectFromPreset(aspectRatio, customWidth, customHeight);
   let p = prompt;
-  if (aspectRatio === 'custom' && customWidth && customHeight) {
+  if (aspectRatio === "custom" && customWidth && customHeight) {
     p = `${p}\n\n(Target composition ~${customWidth}x${customHeight}px.)`;
   }
   return {
@@ -187,47 +196,37 @@ function buildTextToImageInput(
   customHeight: number | undefined,
   outputFormat: OutputFormat,
 ): Record<string, unknown> {
-  if (modelId.includes('imagen4')) {
-    return imagenStyleInput(
-      prompt,
-      aspectRatio,
-      customWidth,
-      customHeight,
-    );
+  if (modelId.includes("imagen4")) {
+    return imagenStyleInput(prompt, aspectRatio, customWidth, customHeight);
   }
 
-  if (modelId.includes('imagen3')) {
-    return imagenStyleInput(
-      prompt,
-      aspectRatio,
-      customWidth,
-      customHeight,
-    );
+  if (modelId.includes("imagen3")) {
+    return imagenStyleInput(prompt, aspectRatio, customWidth, customHeight);
   }
 
-  if (modelId === 'fal-ai/nano-banana') {
+  if (modelId === "fal-ai/nano-banana") {
     return { prompt };
   }
 
   if (
-    modelId === 'fal-ai/nano-banana-2' ||
-    modelId === 'fal-ai/nano-banana-pro'
+    modelId === "fal-ai/nano-banana-2" ||
+    modelId === "fal-ai/nano-banana-pro"
   ) {
     return {
       prompt,
       aspect_ratio: nanoAspectFromPreset(aspectRatio),
       output_format: outputFormat,
-      resolution: '1K',
+      resolution: "1K",
       num_images: 1,
       limit_generations: true,
     };
   }
 
-  if (modelId.includes('recraft')) {
+  if (modelId.includes("recraft")) {
     return { prompt };
   }
 
-  if (modelId.includes('flux-2-pro')) {
+  if (modelId.includes("flux-2-pro")) {
     const image_size = fluxImageSizeFromPreset(
       aspectRatio,
       customWidth,
@@ -251,19 +250,26 @@ function buildImageToImageInput(
   aspectRatio: AspectRatioPreset,
   outputFormat: OutputFormat,
 ): Record<string, unknown> {
-  if (modelId.includes('gemini-3.1-flash-image-preview')) {
+  if (modelId.includes("gemini-25-flash-image")) {
+    return {
+      prompt,
+      image_urls: imageUrls,
+    };
+  }
+
+  if (modelId.includes("gemini-3.1-flash-image-preview")) {
     return {
       prompt,
       image_urls: imageUrls,
       aspect_ratio: nanoAspectFromPreset(aspectRatio),
       output_format: outputFormat,
-      resolution: '1K',
+      resolution: "1K",
       num_images: 1,
       limit_generations: true,
     };
   }
 
-  if (modelId.includes('flux-2-pro/edit')) {
+  if (modelId.includes("flux-2-pro/edit")) {
     const image_size = fluxImageSizeFromPreset(aspectRatio);
     return {
       prompt,
@@ -274,33 +280,33 @@ function buildImageToImageInput(
     };
   }
 
-  if (modelId.includes('kling-image/o3')) {
+  if (modelId.includes("kling-image/o3")) {
     return {
       prompt,
       image_urls: imageUrls,
     };
   }
 
-  if (modelId.includes('nano-banana')) {
+  if (modelId.includes("nano-banana")) {
     return {
       prompt,
       image_urls: imageUrls,
       aspect_ratio: nanoAspectFromPreset(aspectRatio),
       output_format: outputFormat,
-      resolution: '1K',
+      resolution: "1K",
       num_images: 1,
       limit_generations: true,
     };
   }
 
-  if (modelId.includes('kontext')) {
+  if (modelId.includes("kontext")) {
     return {
       prompt,
       image_urls: imageUrls,
       aspect_ratio: kontextAspectFromPreset(aspectRatio),
       output_format: fluxOutputFormat(outputFormat),
       num_images: 1,
-      safety_tolerance: '2',
+      safety_tolerance: "2",
     };
   }
 
@@ -326,7 +332,7 @@ function buildImageToVideoInput(
     return input;
   }
 
-  if (modelId.includes('pixverse')) {
+  if (modelId.includes("pixverse")) {
     return {
       prompt,
       image_url: imageUrl,
@@ -334,7 +340,7 @@ function buildImageToVideoInput(
     };
   }
 
-  if (modelId.includes('sora-2') || modelId.includes('veo3.1')) {
+  if (modelId.includes("sora-2") || modelId.includes("veo3.1")) {
     return {
       prompt,
       image_url: imageUrl,
@@ -379,7 +385,7 @@ export async function runAiGeneration(
     duration,
   } = params;
 
-  if (mode === 'text-to-image') {
+  if (mode === "text-to-image") {
     const input = buildTextToImageInput(
       modelId,
       prompt,
@@ -392,14 +398,14 @@ export async function runAiGeneration(
     const img = pickImageFromData(data);
     return {
       url: img.url,
-      status: 'completed',
+      status: "completed",
       width: img.width,
       height: img.height,
-      contentType: img.content_type ?? 'image/png',
+      contentType: img.content_type ?? "image/png",
     };
   }
 
-  if (mode === 'image-to-image') {
+  if (mode === "image-to-image") {
     const input = buildImageToImageInput(
       modelId,
       prompt,
@@ -411,17 +417,17 @@ export async function runAiGeneration(
     const img = pickImageFromData(data);
     return {
       url: img.url,
-      status: 'completed',
+      status: "completed",
       width: img.width,
       height: img.height,
-      contentType: img.content_type ?? 'image/png',
+      contentType: img.content_type ?? "image/png",
     };
   }
 
-  if (mode === 'image-to-video') {
+  if (mode === "image-to-video") {
     const imageUrl = imageUrls[0];
     if (!imageUrl) {
-      throw new Error('image-to-video requires at least one image URL');
+      throw new Error("image-to-video requires at least one image URL");
     }
     const input = buildImageToVideoInput(
       modelId,
@@ -434,10 +440,67 @@ export async function runAiGeneration(
     const vid = pickVideoFromData(data);
     return {
       url: vid.url,
-      status: 'completed',
+      status: "completed",
       contentType: vid.contentType,
     };
   }
 
   throw new Error(`Unsupported generation mode: ${mode}`);
+}
+
+// ─── Ghost Mannequin ──────────────────────────────────────────────────────────
+
+export interface RunGhostMannequinParams {
+  imageUrl: string;
+  prompt: string;
+  quality: "standard" | "premium";
+  outputFormat: OutputFormat;
+}
+
+/**
+ * Standard quality: single fal call to bria/fibo-edit/edit.
+ * Premium quality : bg-remove first, then fibo-edit on the clean image.
+ */
+export async function runGhostMannequin(
+  params: RunGhostMannequinParams,
+): Promise<AiGenerationResult> {
+  ensureFalConfigured();
+
+  const { imageUrl, prompt, quality, outputFormat } = params;
+
+  const ghostEditModel = "fal-ai/bria/fibo-edit/edit";
+  const bgRemoveModel = "fal-ai/bria/background/remove";
+
+  let inputImageUrl = imageUrl;
+
+  if (quality === "premium") {
+    // Step 1: remove background from the original photo
+    const bgData = await falSubscribe<Record<string, unknown>>(bgRemoveModel, {
+      image_url: imageUrl,
+    });
+    // bria/background/remove returns { image: { url, ... } }
+    const bgImage = bgData.image as { url?: string } | undefined;
+    if (!bgImage?.url) {
+      throw new Error(
+        "[ghost-mannequin] Background removal returned no image URL",
+      );
+    }
+    inputImageUrl = bgImage.url;
+  }
+
+  // Step 2 (both tiers): ghost mannequin edit
+  const editData = await falSubscribe<unknown>(ghostEditModel, {
+    image_url: inputImageUrl,
+    prompt,
+    output_format: outputFormat,
+  });
+
+  const img = pickImageFromData(editData);
+  return {
+    url: img.url,
+    status: "completed",
+    width: img.width,
+    height: img.height,
+    contentType: img.content_type ?? `image/${outputFormat}`,
+  };
 }
