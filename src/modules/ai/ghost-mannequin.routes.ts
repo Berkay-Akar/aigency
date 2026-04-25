@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
 import { Prisma } from "@prisma/client";
 import { authenticate, getUser } from "../auth/auth.middleware";
+import { createUploadMiddleware } from "./upload.middleware";
 import { GhostMannequinSchema } from "./ghost-mannequin.schema";
 import { dispatchPendingOutboxJobs } from "../../services/queue";
 import { prisma } from "../../lib/prisma";
@@ -16,9 +17,13 @@ import {
 export async function ghostMannequinRoutes(
   fastify: FastifyInstance,
 ): Promise<void> {
+  const uploadMiddleware = createUploadMiddleware([
+    { name: "productImage", bodyKey: "productImageUrl" },
+  ]);
+
   fastify.post(
     "/ai/ghost-mannequin",
-    { preHandler: authenticate },
+    { preHandler: [authenticate, uploadMiddleware] },
     async (request, reply) => {
       const parsed = GhostMannequinSchema.safeParse(request.body);
       if (!parsed.success) {

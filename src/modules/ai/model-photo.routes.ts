@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
 import { authenticate, getUser } from "../auth/auth.middleware";
+import { createUploadMiddleware } from "./upload.middleware";
 import { ModelPhotoSchema } from "./model-photo.schema";
 import { buildModelPhotoPrompt } from "../../services/prompt-builder/model-photo-prompt.service";
 import { dispatchPendingOutboxJobs } from "../../services/queue";
@@ -30,9 +31,13 @@ export async function modelPhotoRoutes(
   // ─── POST /ai/model-photo ─────────────────────────────────────────────────
   // Accepts product image(s) + model/customization selections, builds a prompt
   // from enum values, and enqueues an image-to-image generation job.
+  const uploadMiddleware = createUploadMiddleware([
+    { name: "productImages", bodyKey: "productImageUrls", multiple: true },
+  ]);
+
   fastify.post(
     "/ai/model-photo",
-    { preHandler: authenticate },
+    { preHandler: [authenticate, uploadMiddleware] },
     async (request, reply) => {
       const parsed = ModelPhotoSchema.safeParse(request.body);
 

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
 import { Prisma } from "@prisma/client";
 import { authenticate, getUser } from "../auth/auth.middleware";
+import { createUploadMiddleware } from "./upload.middleware";
 import { PhotoToVideoSchema } from "./photo-to-video.schema";
 import { buildPhotoToVideoPrompt } from "../../services/prompt-builder/product-prompt.service";
 import { dispatchPendingOutboxJobs } from "../../services/queue";
@@ -14,9 +15,13 @@ import { VIDEO_DURATION_CREDITS } from "../../config/product-generation";
 export async function photoToVideoRoutes(
   fastify: FastifyInstance,
 ): Promise<void> {
+  const uploadMiddleware = createUploadMiddleware([
+    { name: "image", bodyKey: "imageUrl" },
+  ]);
+
   fastify.post(
     "/ai/photo-to-video",
-    { preHandler: authenticate },
+    { preHandler: [authenticate, uploadMiddleware] },
     async (request, reply) => {
       const parsed = PhotoToVideoSchema.safeParse(request.body);
       if (!parsed.success) {

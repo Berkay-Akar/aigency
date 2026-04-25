@@ -10,7 +10,7 @@ import {
   enhanceGenerationPrompt,
   isOpenAiConfigured,
 } from "../services/prompt-builder";
-import { uploadFile } from "../services/storage";
+import { uploadFile, userOutputKey } from "../services/storage";
 import {
   InstagramService,
   TikTokService,
@@ -124,7 +124,7 @@ export const aiWorker = new Worker<AiJobPayload>(
     }
 
     const ext = result.contentType.split("/")[1] ?? "bin";
-    const objectKey = `workspaces/${workspaceId}/assets/${jobId}.${ext}`;
+    const objectKey = userOutputKey(userId, jobId, ext);
     let publicUrl: string;
     let storageKey: string;
     try {

@@ -120,8 +120,9 @@ interface FalImagePayload {
 }
 
 function pickImageFromData(data: unknown): FalImageRow {
-  const d = data as FalImagePayload;
-  const img = d.images?.[0];
+  const d = data as FalImagePayload & { image?: FalImageRow };
+  // bria/fibo-edit/edit returns a top-level `image` object; other models use `images[]`
+  const img = d.images?.[0] ?? d.image;
   if (!img?.url) {
     throw new Error("fal.ai returned no images");
   }
@@ -468,7 +469,7 @@ export async function runGhostMannequin(
 
   const { imageUrl, prompt, quality, outputFormat } = params;
 
-  const ghostEditModel = "fal-ai/bria/fibo-edit/edit";
+  const ghostEditModel = "bria/fibo-edit/edit";
   const bgRemoveModel = "fal-ai/bria/background/remove";
 
   let inputImageUrl = imageUrl;
@@ -489,10 +490,10 @@ export async function runGhostMannequin(
   }
 
   // Step 2 (both tiers): ghost mannequin edit
+  // bria/fibo-edit/edit uses `instruction` (not `prompt`) and has no `output_format` param
   const editData = await falSubscribe<unknown>(ghostEditModel, {
     image_url: inputImageUrl,
-    prompt,
-    output_format: outputFormat,
+    instruction: prompt,
   });
 
   const img = pickImageFromData(editData);

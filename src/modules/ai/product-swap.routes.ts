@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
 import { Prisma } from "@prisma/client";
 import { authenticate, getUser } from "../auth/auth.middleware";
+import { createUploadMiddleware } from "./upload.middleware";
 import { ProductSwapSchema } from "./product-swap.schema";
 import { dispatchPendingOutboxJobs } from "../../services/queue";
 import { prisma } from "../../lib/prisma";
@@ -13,9 +14,14 @@ import { RESOLUTION_CONFIG } from "../../config/model-photo";
 export async function productSwapRoutes(
   fastify: FastifyInstance,
 ): Promise<void> {
+  const uploadMiddleware = createUploadMiddleware([
+    { name: "productImage", bodyKey: "productImageUrl" },
+    { name: "sceneImage", bodyKey: "sceneImageUrl" },
+  ]);
+
   fastify.post(
     "/ai/product-swap",
-    { preHandler: authenticate },
+    { preHandler: [authenticate, uploadMiddleware] },
     async (request, reply) => {
       const parsed = ProductSwapSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -38,9 +44,22 @@ export async function productSwapRoutes(
 
       const customExtra = data.customPrompt ? ` ${data.customPrompt}` : "";
       const prompt =
-        `Replace the main product/object in the scene (second image) with the product shown ` +
-        `in the first image. Preserve the exact composition, lighting, shadows, perspective ` +
-        `and background. Only the product itself should change.${customExtra}`;
+        `Use image 1 as the exact product reference. ` +
+        `Use image 2 as the base scene and composition reference. ` +
+        `Replace the existing product or object in image 2 with the exact product from image 1. ` +
+        `Keep the pose, framing, camera angle, hand placement, body position, styling, background, lighting direction, and overall composition of image 2 as close as possible. ` +
+        `Only swap the product. ` +
+        `The product from image 1 must be preserved exactly as shown: same design, shape, proportions, materials, colors, pattern, texture, structure, hardware, and all visible details. ` +
+        `Do not redesign, reinterpret, restyle, simplify, or approximate the product. ` +
+        `Integrate the product naturally into image 2 with realistic scale, realistic perspective, realistic contact, realistic shadows, and realistic interaction with the person or environment. ` +
+        `The final result must look like a real professional photograph, clean and believable. ` +
+        `Do not change the person’s identity, face, body, clothing, pose, or background unless required for natural product placement. ` +
+        `Do not generate a new scene. ` +
+        `Do not create a different product or a similar version of the product. ` +
+        `Do not alter the product color. ` +
+        `Do not create a new product, a modified version, or a similar-looking replacement. ` +
+        `Do not add extra accessories, extra objects, text, logo, watermark, or decorative elements. ` +
+        `This is a precise product swap task: preserve image 2, replace only the product with image 1.${customExtra}`;
 
       const resConfig = RESOLUTION_CONFIG[data.resolution];
       // Swap scenes are typically square; use square dimensions

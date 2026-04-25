@@ -24,6 +24,7 @@
     "@fal-ai/client": "^1.9.5",
     "@fastify/cors": "^10.1.0",
     "@fastify/jwt": "^10.0.0",
+    "@fastify/multipart": "^10.0.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/sensible": "^6.0.4",
     "@prisma/client": "^6.19.2",

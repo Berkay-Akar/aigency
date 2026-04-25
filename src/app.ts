@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import sensible from "@fastify/sensible";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
+import multipart from "@fastify/multipart";
 import { env } from "./config/env";
 import { healthRoutes } from "./lib/health.route";
 import { authRoutes } from "./modules/auth/auth.routes";
@@ -36,6 +37,7 @@ export function buildApp() {
   });
 
   fastify.register(sensible);
+  fastify.register(multipart);
 
   fastify.register(jwt, {
     secret: env.JWT_SECRET,

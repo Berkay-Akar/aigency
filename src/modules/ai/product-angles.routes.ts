@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
 import { Prisma } from "@prisma/client";
 import { authenticate, getUser } from "../auth/auth.middleware";
+import { createUploadMiddleware } from "./upload.middleware";
 import { ProductAnglesSchema } from "./product-angles.schema";
 import { buildProductAnglePrompt } from "../../services/prompt-builder/product-prompt.service";
 import { dispatchPendingOutboxJobs } from "../../services/queue";
@@ -14,9 +15,13 @@ import { RESOLUTION_CONFIG } from "../../config/model-photo";
 export async function productAnglesRoutes(
   fastify: FastifyInstance,
 ): Promise<void> {
+  const uploadMiddleware = createUploadMiddleware([
+    { name: "productImage", bodyKey: "productImageUrl" },
+  ]);
+
   fastify.post(
     "/ai/product-angles",
-    { preHandler: authenticate },
+    { preHandler: [authenticate, uploadMiddleware] },
     async (request, reply) => {
       const parsed = ProductAnglesSchema.safeParse(request.body);
       if (!parsed.success) {

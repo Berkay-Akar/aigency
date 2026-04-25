@@ -1,5 +1,5 @@
-import { v2 as cloudinary } from 'cloudinary';
-import { env } from '../../config/env';
+import { v2 as cloudinary } from "cloudinary";
+import { env } from "../../config/env";
 
 /* -------------------------------------------------------------------------- */
 /* Cloudflare R2 (S3) — geçici olarak devre dışı; tekrar açmak için          */
@@ -69,7 +69,7 @@ import { env } from '../../config/env';
 //   );
 // }
 
-if (env.STORAGE_PROVIDER === 'cloudinary') {
+if (env.STORAGE_PROVIDER === "cloudinary") {
   cloudinary.config({
     cloud_name: env.CLOUDINARY_CLOUD_NAME,
     api_key: env.CLOUDINARY_API_KEY,
@@ -79,10 +79,10 @@ if (env.STORAGE_PROVIDER === 'cloudinary') {
 }
 
 function parseStorageKey(key: string): { folder: string; publicId: string } {
-  const lastSlash = key.lastIndexOf('/');
+  const lastSlash = key.lastIndexOf("/");
   const fileName = lastSlash >= 0 ? key.slice(lastSlash + 1) : key;
-  const folder = lastSlash >= 0 ? key.slice(0, lastSlash) : '';
-  const dot = fileName.lastIndexOf('.');
+  const folder = lastSlash >= 0 ? key.slice(0, lastSlash) : "";
+  const dot = fileName.lastIndexOf(".");
   const base = dot >= 0 ? fileName.slice(0, dot) : fileName;
   return { folder, publicId: base };
 }
@@ -93,23 +93,80 @@ export interface UploadResult {
   storageKey: string;
 }
 
+/** Cloudinary key for user-uploaded input images: `uploads/{userId}/{uuid}.{ext}` */
+export function userUploadKey(
+  userId: string,
+  uuid: string,
+  ext: string,
+): string {
+  return `uploads/${userId}/${uuid}.${ext}`;
+}
+
+/** Cloudinary key for AI generation outputs: `outputs/{userId}/{jobId}.{ext}` */
+export function userOutputKey(
+  userId: string,
+  jobId: string,
+  ext: string,
+): string {
+  return `outputs/${userId}/${jobId}.${ext}`;
+}
+
+/** Cloudinary key for AI-workflow input images: `inputs/{userId}/{uuid}.{ext}` */
+export function userAiInputKey(
+  userId: string,
+  uuid: string,
+  ext: string,
+): string {
+  return `inputs/${userId}/${uuid}.${ext}`;
+}
+
+/**
+ * Upload a file received from an AI route's multipart upload
+ * to `inputs/{userId}/`. Used by the upload middleware.
+ */
+export async function uploadAiInputFile(
+  userId: string,
+  fileUuid: string,
+  body: Buffer,
+  contentType: string,
+): Promise<UploadResult> {
+  const ext = contentType.split("/")[1]?.split(";")[0] ?? "bin";
+  const key = userAiInputKey(userId, fileUuid, ext);
+  return uploadFile(key, body, contentType);
+}
+
+/**
+ * Upload a user-provided input file to `uploads/{userId}/`.
+ * Used by the `POST /assets/upload` endpoint.
+ */
+export async function uploadUserInputFile(
+  userId: string,
+  fileUuid: string,
+  body: Buffer,
+  contentType: string,
+): Promise<UploadResult> {
+  const ext = contentType.split("/")[1]?.split(";")[0] ?? "bin";
+  const key = userUploadKey(userId, fileUuid, ext);
+  return uploadFile(key, body, contentType);
+}
+
 /**
  * Upload buffer; returns public URL + storage key for DB.
- * `key` format: `workspaces/{workspaceId}/assets/{jobId}.{ext}` (R2 ile aynı sözleşme).
+ * `key` format: `outputs/{userId}/{jobId}.{ext}` for AI outputs.
  */
 export async function uploadFile(
   key: string,
   body: Buffer,
   contentType: string,
 ): Promise<UploadResult> {
-  if (env.STORAGE_PROVIDER === 'r2') {
+  if (env.STORAGE_PROVIDER === "r2") {
     throw new Error(
-      'STORAGE_PROVIDER=r2 seçili fakat R2 kodu şu an yorumda; storage.service.ts içinde R2 bloğunu aç.',
+      "STORAGE_PROVIDER=r2 seçili fakat R2 kodu şu an yorumda; storage.service.ts içinde R2 bloğunu aç.",
     );
   }
 
   const { folder, publicId } = parseStorageKey(key);
-  const resourceType = contentType.startsWith('video/') ? 'video' : 'image';
+  const resourceType = contentType.startsWith("video/") ? "video" : "image";
 
   const result = await new Promise<{ secure_url: string; public_id: string }>(
     (resolve, reject) => {
@@ -123,8 +180,9 @@ export async function uploadFile(
         (err, res) => {
           if (err) reject(err);
           else if (!res?.secure_url)
-            reject(new Error('Cloudinary upload returned no secure_url'));
-          else resolve({ secure_url: res.secure_url, public_id: res.public_id });
+            reject(new Error("Cloudinary upload returned no secure_url"));
+          else
+            resolve({ secure_url: res.secure_url, public_id: res.public_id });
         },
       );
       stream.end(body);
@@ -136,10 +194,12 @@ export async function uploadFile(
 
 /** Cloudinary için: tam `public_id` (klasör + id); R2 için: object key. */
 export function getPublicUrl(key: string): string {
-  if (env.STORAGE_PROVIDER === 'cloudinary') {
-    return cloudinary.url(key, { secure: true, resource_type: 'auto' });
+  if (env.STORAGE_PROVIDER === "cloudinary") {
+    return cloudinary.url(key, { secure: true, resource_type: "auto" });
   }
-  throw new Error('getPublicUrl: R2 modu yorumda — Cloudinary kullanın veya R2 bloğunu açın.');
+  throw new Error(
+    "getPublicUrl: R2 modu yorumda — Cloudinary kullanın veya R2 bloğunu açın.",
+  );
 }
 
 export async function getPresignedUploadUrl(
@@ -148,17 +208,17 @@ export async function getPresignedUploadUrl(
   _expiresIn = 300,
 ): Promise<string> {
   throw new Error(
-    'getPresignedUploadUrl: Cloudinary modunda desteklenmiyor (R2’ye dönünce storage.service.ts içindeki R2 fonksiyonunu kullan).',
+    "getPresignedUploadUrl: Cloudinary modunda desteklenmiyor (R2’ye dönünce storage.service.ts içindeki R2 fonksiyonunu kullan).",
   );
 }
 
 export async function deleteFile(publicIdOrKey: string): Promise<void> {
-  if (env.STORAGE_PROVIDER === 'cloudinary') {
+  if (env.STORAGE_PROVIDER === "cloudinary") {
     await cloudinary.uploader.destroy(publicIdOrKey, {
-      resource_type: 'auto',
+      resource_type: "auto",
       invalidate: true,
     });
     return;
   }
-  throw new Error('deleteFile: R2 modu yorumda.');
+  throw new Error("deleteFile: R2 modu yorumda.");
 }

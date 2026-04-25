@@ -1,8 +1,10 @@
-import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
-import { authenticate, getUser } from '../auth/auth.middleware';
-import { prisma } from '../../lib/prisma';
-import { sendSuccess, sendError } from '../../utils/response';
+import { randomUUID } from "crypto";
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import { authenticate, getUser } from "../auth/auth.middleware";
+import { prisma } from "../../lib/prisma";
+import { sendSuccess, sendError } from "../../utils/response";
+import { uploadUserInputFile } from "../../services/storage";
 
 const AssetIdParamSchema = z.object({
   id: z.string().min(1),
@@ -13,16 +15,43 @@ const AssetListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+const JOB_SELECT = {
+  id: true,
+  mode: true,
+  jobType: true,
+  modelTier: true,
+  modelId: true,
+  falModelId: true,
+  prompt: true,
+  enhancePrompt: true,
+  aspectRatio: true,
+  customWidth: true,
+  customHeight: true,
+  outputFormat: true,
+  imageUrls: true,
+  duration: true,
+  platform: true,
+  tone: true,
+  modelDetails: true,
+  customization: true,
+  creditsCost: true,
+  status: true,
+} as const;
+
 export async function assetRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
-    '/assets',
+    "/assets",
     { preHandler: authenticate },
     async (request, reply) => {
       const { workspaceId } = getUser(request);
       const parsed = AssetListQuerySchema.safeParse(request.query);
 
       if (!parsed.success) {
-        return sendError(reply, parsed.error.errors[0]?.message ?? 'Invalid query', 400);
+        return sendError(
+          reply,
+          parsed.error.errors[0]?.message ?? "Invalid query",
+          400,
+        );
       }
 
       const { page, limit } = parsed.data;
@@ -31,29 +60,44 @@ export async function assetRoutes(fastify: FastifyInstance): Promise<void> {
       const [assets, total] = await Promise.all([
         prisma.asset.findMany({
           where: { workspaceId },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           skip,
           take: limit,
         }),
         prisma.asset.count({ where: { workspaceId } }),
       ]);
 
+      // Batch-fetch all linked generation jobs (no N+1)
+      const jobIds = assets.map((a) => a.jobId).filter(Boolean);
+      const jobs = jobIds.length
+        ? await prisma.aiGenerationJob.findMany({
+            where: { id: { in: jobIds } },
+            select: JOB_SELECT,
+          })
+        : [];
+      const jobMap = new Map(jobs.map((j) => [j.id, j]));
+
+      const enrichedAssets = assets.map((asset) => ({
+        ...asset,
+        generationJob: jobMap.get(asset.jobId) ?? null,
+      }));
+
       return sendSuccess(reply, {
-        assets,
+        assets: enrichedAssets,
         pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       });
     },
   );
 
   fastify.get(
-    '/assets/:id',
+    "/assets/:id",
     { preHandler: authenticate },
     async (request, reply) => {
       const { workspaceId } = getUser(request);
       const paramsParsed = AssetIdParamSchema.safeParse(request.params);
 
       if (!paramsParsed.success) {
-        return sendError(reply, 'Invalid asset id', 400);
+        return sendError(reply, "Invalid asset id", 400);
       }
 
       const asset = await prisma.asset.findFirst({
@@ -61,10 +105,58 @@ export async function assetRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (!asset) {
-        return sendError(reply, 'Asset not found', 404);
+        return sendError(reply, "Asset not found", 404);
       }
 
-      return sendSuccess(reply, { asset });
+      const generationJob = await prisma.aiGenerationJob.findUnique({
+        where: { id: asset.jobId },
+        select: JOB_SELECT,
+      });
+
+      return sendSuccess(reply, { asset: { ...asset, generationJob } });
+    },
+  );
+
+  fastify.post(
+    "/assets/upload",
+    { preHandler: authenticate },
+    async (request, reply) => {
+      const { sub: userId } = getUser(request);
+
+      const data = await request.file({
+        limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+      });
+
+      if (!data) {
+        return sendError(reply, "No file uploaded", 400);
+      }
+
+      const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+      if (!ALLOWED_TYPES.includes(data.mimetype)) {
+        return sendError(
+          reply,
+          "Only JPEG, PNG and WebP images are allowed",
+          415,
+        );
+      }
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of data.file) {
+        chunks.push(chunk);
+      }
+      const buffer = Buffer.concat(chunks);
+
+      const uploaded = await uploadUserInputFile(
+        userId,
+        randomUUID(),
+        buffer,
+        data.mimetype,
+      );
+
+      return sendSuccess(reply, {
+        url: uploaded.url,
+        storageKey: uploaded.storageKey,
+      });
     },
   );
 }

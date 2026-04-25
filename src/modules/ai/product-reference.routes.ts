@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { FastifyInstance } from "fastify";
 import { Prisma } from "@prisma/client";
 import { authenticate, getUser } from "../auth/auth.middleware";
+import { createUploadMiddleware } from "./upload.middleware";
 import { ProductReferenceSchema } from "./product-reference.schema";
 import { buildProductReferencePrompt } from "../../services/prompt-builder/product-prompt.service";
 import { dispatchPendingOutboxJobs } from "../../services/queue";
@@ -14,9 +15,14 @@ import { RESOLUTION_CONFIG } from "../../config/model-photo";
 export async function productReferenceRoutes(
   fastify: FastifyInstance,
 ): Promise<void> {
+  const uploadMiddleware = createUploadMiddleware([
+    { name: "productImage", bodyKey: "productImageUrl" },
+    { name: "referenceImage", bodyKey: "referenceImageUrl" },
+  ]);
+
   fastify.post(
     "/ai/product-reference",
-    { preHandler: authenticate },
+    { preHandler: [authenticate, uploadMiddleware] },
     async (request, reply) => {
       const parsed = ProductReferenceSchema.safeParse(request.body);
       if (!parsed.success) {

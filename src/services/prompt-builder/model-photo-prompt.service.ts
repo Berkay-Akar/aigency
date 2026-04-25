@@ -67,10 +67,15 @@ export function buildModelPhotoPrompt(
       `with ${skinDesc} skin, ${eyeDesc} eyes, ${faceDesc} facial features,`,
       `and ${expressionDesc}.`,
       `${capitalize(hairstyleDesc)} in ${hairColorDesc} color.`,
-      `Wearing the clothing from the provided product image.`,
+      `Wearing the clothing from the provided product image, styled in a clean, elegant, luxury-ready way.`,
       `Body size ${customization.bodySize.toUpperCase()}, approximately ${customization.height}cm tall.`,
       `${capitalize(shotDesc)} shot.`,
-      `Professional fashion photography, clean background, commercial quality, sharp details, ready for social media advertising.${customExtra}`,
+      `Create a premium, social-media-ready fashion campaign image with a polished luxury aesthetic.`,
+      `The result should feel like a high-end commercial fashion shoot made for Instagram advertising and modern brand campaigns.`,
+      `Use soft flattering lighting, clean composition, realistic skin texture, refined pose, subtle quiet-luxury styling, and a minimal premium background.`,
+      `The image should look professionally art-directed, visually expensive, highly shareable, and commercially appealing.`,
+      `Photorealistic, elegant, sophisticated, modern, premium fashion photography, sharp details, realistic proportions, luxury brand mood, ready for social media advertising.`,
+      `No text, no logo, no watermark, no typography, no extra accessories, no distracting elements.${customExtra}`,
     ].join(" ");
   } else {
     prompt = [
