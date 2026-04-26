@@ -102,36 +102,59 @@ export function userUploadKey(
   return `uploads/${userId}/${uuid}.${ext}`;
 }
 
-/** Cloudinary key for AI generation outputs: `outputs/{userId}/{jobId}.{ext}` */
+/** Cloudinary key for AI generation outputs: `outputs/{workspaceId}/{jobId}.{ext}` */
 export function userOutputKey(
-  userId: string,
+  workspaceId: string,
   jobId: string,
   ext: string,
 ): string {
-  return `outputs/${userId}/${jobId}.${ext}`;
+  return `outputs/${workspaceId}/${jobId}.${ext}`;
 }
 
-/** Cloudinary key for AI-workflow input images: `inputs/{userId}/{uuid}.{ext}` */
+/** Cloudinary key for AI-workflow input images: `inputs/{workspaceId}/{uuid}.{ext}` */
 export function userAiInputKey(
-  userId: string,
+  workspaceId: string,
   uuid: string,
   ext: string,
 ): string {
-  return `inputs/${userId}/${uuid}.${ext}`;
+  return `inputs/${workspaceId}/${uuid}.${ext}`;
 }
 
 /**
  * Upload a file received from an AI route's multipart upload
- * to `inputs/{userId}/`. Used by the upload middleware.
+ * to `inputs/{workspaceId}/`. Used by the upload middleware.
  */
 export async function uploadAiInputFile(
-  userId: string,
+  workspaceId: string,
   fileUuid: string,
   body: Buffer,
   contentType: string,
 ): Promise<UploadResult> {
   const ext = contentType.split("/")[1]?.split(";")[0] ?? "bin";
-  const key = userAiInputKey(userId, fileUuid, ext);
+  const key = userAiInputKey(workspaceId, fileUuid, ext);
+  return uploadFile(key, body, contentType);
+}
+
+/** Cloudinary key for brand assets (logos, etc.): `brand-assets/{workspaceId}/{filename}.{ext}` */
+export function brandAssetKey(
+  workspaceId: string,
+  filename: string,
+  ext: string,
+): string {
+  return `brand-assets/${workspaceId}/${filename}.${ext}`;
+}
+
+/**
+ * Upload a brand asset (e.g. logo) to `brand-assets/{workspaceId}/`.
+ */
+export async function uploadBrandAssetFile(
+  workspaceId: string,
+  filename: string,
+  body: Buffer,
+  contentType: string,
+): Promise<UploadResult> {
+  const ext = contentType.split("/")[1]?.split(";")[0] ?? "bin";
+  const key = brandAssetKey(workspaceId, filename, ext);
   return uploadFile(key, body, contentType);
 }
 

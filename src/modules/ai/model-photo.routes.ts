@@ -4,6 +4,7 @@ import { authenticate, getUser } from "../auth/auth.middleware";
 import { createUploadMiddleware } from "./upload.middleware";
 import { ModelPhotoSchema } from "./model-photo.schema";
 import { buildModelPhotoPrompt } from "../../services/prompt-builder/model-photo-prompt.service";
+import { buildModelPhotoBrandSuffix } from "../../services/prompt-builder/brand-kit-prompt.service";
 import { dispatchPendingOutboxJobs } from "../../services/queue";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
@@ -53,8 +54,18 @@ export async function modelPhotoRoutes(
       const data = parsed.data;
 
       const creditsCost = RESOLUTION_CONFIG[data.resolution].creditsCost;
-      const { prompt, aspectRatio, width, height } =
-        buildModelPhotoPrompt(data);
+      const {
+        prompt: basePrompt,
+        aspectRatio,
+        width,
+        height,
+      } = buildModelPhotoPrompt(data);
+      const brandSuffix = data.useBrandKit
+        ? await prisma.brandKit
+            .findUnique({ where: { workspaceId } })
+            .then((kit) => (kit ? buildModelPhotoBrandSuffix(kit) : ""))
+        : "";
+      const prompt = `${basePrompt}${brandSuffix}`;
       const modelId = resolveFinalModelId("image-to-image", data.modelTier);
       const jobId = randomUUID();
 
@@ -108,6 +119,7 @@ export async function modelPhotoRoutes(
                     } as unknown as Prisma.InputJsonValue),
               jobType: "MODEL_PHOTO",
               creditsCost,
+              isDefaultPrompt: !data.customPrompt,
               storageProvider: env.STORAGE_PROVIDER,
             },
           });

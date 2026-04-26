@@ -23,6 +23,7 @@ const JOB_SELECT = {
   modelId: true,
   falModelId: true,
   prompt: true,
+  promptFinal: true,
   enhancePrompt: true,
   aspectRatio: true,
   customWidth: true,
@@ -36,6 +37,7 @@ const JOB_SELECT = {
   customization: true,
   creditsCost: true,
   status: true,
+  isDefaultPrompt: true,
 } as const;
 
 export async function assetRoutes(fastify: FastifyInstance): Promise<void> {
@@ -77,10 +79,19 @@ export async function assetRoutes(fastify: FastifyInstance): Promise<void> {
         : [];
       const jobMap = new Map(jobs.map((j) => [j.id, j]));
 
-      const enrichedAssets = assets.map((asset) => ({
-        ...asset,
-        generationJob: jobMap.get(asset.jobId) ?? null,
-      }));
+      const enrichedAssets = assets.map((asset) => {
+        const job = jobMap.get(asset.jobId) ?? null;
+        return {
+          ...asset,
+          generationJob: job
+            ? {
+                ...job,
+                prompt: job.isDefaultPrompt ? null : job.prompt,
+                promptFinal: job.isDefaultPrompt ? null : job.promptFinal,
+              }
+            : null,
+        };
+      });
 
       return sendSuccess(reply, {
         assets: enrichedAssets,
@@ -113,7 +124,22 @@ export async function assetRoutes(fastify: FastifyInstance): Promise<void> {
         select: JOB_SELECT,
       });
 
-      return sendSuccess(reply, { asset: { ...asset, generationJob } });
+      return sendSuccess(reply, {
+        asset: {
+          ...asset,
+          generationJob: generationJob
+            ? {
+                ...generationJob,
+                prompt: generationJob.isDefaultPrompt
+                  ? null
+                  : generationJob.prompt,
+                promptFinal: generationJob.isDefaultPrompt
+                  ? null
+                  : generationJob.promptFinal,
+              }
+            : null,
+        },
+      });
     },
   );
 

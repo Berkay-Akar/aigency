@@ -11,6 +11,7 @@ import { sendSuccess, sendError } from "../../utils/response";
 import { env } from "../../config/env";
 import { resolveFinalModelId } from "../../config/models";
 import { VIDEO_DURATION_CREDITS } from "../../config/product-generation";
+import { buildPhotoToVideoBrandSuffix } from "../../services/prompt-builder/brand-kit-prompt.service";
 
 export async function photoToVideoRoutes(
   fastify: FastifyInstance,
@@ -36,10 +37,16 @@ export async function photoToVideoRoutes(
       const data = parsed.data;
 
       const creditsCost = VIDEO_DURATION_CREDITS[data.duration];
-      const { prompt, aspectRatio } = buildPhotoToVideoPrompt(
+      const { prompt: basePrompt, aspectRatio } = buildPhotoToVideoPrompt(
         data.platform,
         data.customPrompt,
       );
+      const brandSuffix = data.useBrandKit
+        ? await prisma.brandKit
+            .findUnique({ where: { workspaceId } })
+            .then((kit) => (kit ? buildPhotoToVideoBrandSuffix(kit) : ""))
+        : "";
+      const prompt = `${basePrompt}${brandSuffix}`;
       const modelId = resolveFinalModelId("image-to-video", data.modelTier);
       const jobId = randomUUID();
 
@@ -82,6 +89,7 @@ export async function photoToVideoRoutes(
               platform: data.platform,
               jobType: "PHOTO_TO_VIDEO",
               creditsCost,
+              isDefaultPrompt: !data.customPrompt,
               storageProvider: env.STORAGE_PROVIDER,
             },
           });

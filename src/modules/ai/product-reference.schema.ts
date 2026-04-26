@@ -13,6 +13,7 @@ export const ProductReferenceSchema = z.object({
     .string()
     .max(500, "Custom prompt must be 500 characters or fewer")
     .optional(),
+  useBrandKit: z.boolean().default(false),
 });
 
 export type ProductReferenceInput = z.infer<typeof ProductReferenceSchema>;

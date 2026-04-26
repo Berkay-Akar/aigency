@@ -1,7 +1,12 @@
-import bcrypt from 'bcryptjs';
-import { randomUUID } from 'crypto';
-import { prisma } from '../../lib/prisma';
-import type { RegisterInput, LoginInput, AuthUser, JwtPayload } from './auth.schema';
+import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
+import { prisma } from "../../lib/prisma";
+import type {
+  RegisterInput,
+  LoginInput,
+  AuthUser,
+  JwtPayload,
+} from "./auth.schema";
 
 const SALT_ROUNDS = 12;
 const REFRESH_TOKEN_TTL_DAYS = 30;
@@ -10,8 +15,8 @@ function generateSlug(name: string): string {
   return name
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function makeSlugUnique(base: string): string {
@@ -77,10 +82,23 @@ export async function rotateRefreshToken(
 ): Promise<{ user: AuthUser; payload: JwtPayload; refreshToken: string }> {
   const user = await prisma.user.findFirst({
     where: { refreshToken: oldToken },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      workspaceId: true,
+      refreshToken: true,
+      refreshTokenExpiresAt: true,
+      passwordHash: true,
+      googleId: true,
+    },
   });
 
   if (!user) {
-    throw Object.assign(new Error('Invalid refresh token'), { statusCode: 401 });
+    throw Object.assign(new Error("Invalid refresh token"), {
+      statusCode: 401,
+    });
   }
 
   if (!user.refreshTokenExpiresAt || user.refreshTokenExpiresAt < new Date()) {
@@ -89,13 +107,19 @@ export async function rotateRefreshToken(
       where: { id: user.id },
       data: { refreshToken: null, refreshTokenExpiresAt: null },
     });
-    throw Object.assign(new Error('Refresh token expired'), { statusCode: 401 });
+    throw Object.assign(new Error("Refresh token expired"), {
+      statusCode: 401,
+    });
   }
 
   const newRefreshToken = await generateRefreshToken(user.id);
   const authUser = sanitizeUser({ ...user, role: user.role.toString() });
 
-  return { user: authUser, payload: buildJwtPayload(authUser), refreshToken: newRefreshToken };
+  return {
+    user: authUser,
+    payload: buildJwtPayload(authUser),
+    refreshToken: newRefreshToken,
+  };
 }
 
 export async function register(
@@ -106,7 +130,7 @@ export async function register(
   });
 
   if (existing) {
-    throw Object.assign(new Error('Email already in use'), { statusCode: 409 });
+    throw Object.assign(new Error("Email already in use"), { statusCode: 409 });
   }
 
   const passwordHash = await hashPassword(input.password);
@@ -118,7 +142,7 @@ export async function register(
     data: {
       name: input.workspaceName,
       slug,
-      ownerId: 'pending',
+      ownerId: "pending",
     },
   });
 
@@ -127,7 +151,7 @@ export async function register(
       email: input.email,
       name: input.name,
       passwordHash,
-      role: 'OWNER',
+      role: "OWNER",
       workspaceId: workspace.id,
     },
   });
@@ -135,6 +159,10 @@ export async function register(
   await prisma.workspace.update({
     where: { id: workspace.id },
     data: { ownerId: user.id },
+  });
+
+  await prisma.workspaceMember.create({
+    data: { userId: user.id, workspaceId: workspace.id, role: "OWNER" },
   });
 
   const refreshToken = await generateRefreshToken(user.id);
@@ -150,17 +178,17 @@ export async function login(
   });
 
   if (!user) {
-    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+    throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
   }
 
   if (!user.passwordHash) {
-    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+    throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
   }
 
   const valid = await verifyPassword(input.password, user.passwordHash);
 
   if (!valid) {
-    throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
+    throw Object.assign(new Error("Invalid credentials"), { statusCode: 401 });
   }
 
   const refreshToken = await generateRefreshToken(user.id);
@@ -173,13 +201,16 @@ export async function authenticateWithGoogle(input: {
   email: string;
   name: string;
 }): Promise<{ user: AuthUser; payload: JwtPayload; refreshToken: string }> {
-  async function logGoogleEvent(eventType: 'GOOGLE_LINKED' | 'GOOGLE_UNLINKED', userId: string | null): Promise<void> {
+  async function logGoogleEvent(
+    eventType: "GOOGLE_LINKED" | "GOOGLE_UNLINKED",
+    userId: string | null,
+  ): Promise<void> {
     await prisma.authAuditLog.create({
       data: {
         eventType,
         userId,
         email: input.email,
-        provider: 'google',
+        provider: "google",
         providerSubject: input.googleId,
       },
     });
@@ -204,16 +235,19 @@ export async function authenticateWithGoogle(input: {
 
   if (byEmail) {
     if (byEmail.googleId && byEmail.googleId !== input.googleId) {
-      throw Object.assign(new Error('This email is linked to another Google account'), {
-        statusCode: 409,
-      });
+      throw Object.assign(
+        new Error("This email is linked to another Google account"),
+        {
+          statusCode: 409,
+        },
+      );
     }
 
     const updated = await prisma.user.update({
       where: { id: byEmail.id },
       data: { googleId: input.googleId },
     });
-    await logGoogleEvent('GOOGLE_LINKED', updated.id);
+    await logGoogleEvent("GOOGLE_LINKED", updated.id);
 
     const refreshToken = await generateRefreshToken(updated.id);
     const authUser = sanitizeUser({
@@ -230,7 +264,7 @@ export async function authenticateWithGoogle(input: {
     data: {
       name: `${input.name}'s workspace`,
       slug,
-      ownerId: 'pending',
+      ownerId: "pending",
     },
   });
 
@@ -240,7 +274,7 @@ export async function authenticateWithGoogle(input: {
       name: input.name,
       passwordHash: null,
       googleId: input.googleId,
-      role: 'OWNER',
+      role: "OWNER",
       workspaceId: workspace.id,
     },
   });
@@ -250,8 +284,12 @@ export async function authenticateWithGoogle(input: {
     data: { ownerId: user.id },
   });
 
+  await prisma.workspaceMember.create({
+    data: { userId: user.id, workspaceId: workspace.id, role: "OWNER" },
+  });
+
   const refreshToken = await generateRefreshToken(user.id);
-  await logGoogleEvent('GOOGLE_LINKED', user.id);
+  await logGoogleEvent("GOOGLE_LINKED", user.id);
   const authUser = sanitizeUser({ ...user, role: user.role.toString() });
   return { user: authUser, payload: buildJwtPayload(authUser), refreshToken };
 }
@@ -261,16 +299,15 @@ export async function unlinkGoogleFromUser(userId: string): Promise<AuthUser> {
     where: { id: userId },
   });
   if (!user) {
-    throw Object.assign(new Error('User not found'), { statusCode: 404 });
+    throw Object.assign(new Error("User not found"), { statusCode: 404 });
   }
   if (!user.googleId) {
-    throw Object.assign(new Error('Google is not linked'), { statusCode: 400 });
+    throw Object.assign(new Error("Google is not linked"), { statusCode: 400 });
   }
   if (!user.passwordHash) {
-    throw Object.assign(
-      new Error('Set a password before unlinking Google'),
-      { statusCode: 400 },
-    );
+    throw Object.assign(new Error("Set a password before unlinking Google"), {
+      statusCode: 400,
+    });
   }
 
   const updated = await prisma.user.update({
@@ -280,12 +317,25 @@ export async function unlinkGoogleFromUser(userId: string): Promise<AuthUser> {
 
   await prisma.authAuditLog.create({
     data: {
-      eventType: 'GOOGLE_UNLINKED',
+      eventType: "GOOGLE_UNLINKED",
       userId: updated.id,
       email: updated.email,
-      provider: 'google',
+      provider: "google",
     },
   });
 
   return sanitizeUser({ ...updated, role: updated.role.toString() });
+}
+
+/**
+ * Build a JWT payload for any workspace the user is a member of.
+ * Used by POST /brands to return a token for the newly created workspace.
+ */
+export function buildWorkspaceJwtPayload(
+  userId: string,
+  email: string,
+  workspaceId: string,
+  role: string,
+): JwtPayload {
+  return { sub: userId, email, workspaceId, role };
 }

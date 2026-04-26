@@ -1,15 +1,15 @@
-import crypto from 'crypto';
-import { prisma } from '../../lib/prisma';
-import { hashPassword } from '../auth/auth.service';
-import { env } from '../../config/env';
-import { sendWorkspaceInviteEmail } from '../../services/email/resend.service';
+import crypto from "crypto";
+import { prisma } from "../../lib/prisma";
+import { hashPassword } from "../auth/auth.service";
+import { env } from "../../config/env";
+import { sendWorkspaceInviteEmail } from "../../services/email/resend.service";
 import type {
   UpdateWorkspaceInput,
   InviteMemberInput,
   AcceptInviteInput,
   SafeUser,
   WorkspaceInfo,
-} from './workspace.schema';
+} from "./workspace.schema";
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -20,13 +20,15 @@ const SAFE_USER_SELECT = {
   createdAt: true,
 } as const;
 
-export async function getWorkspace(workspaceId: string): Promise<WorkspaceInfo> {
+export async function getWorkspace(
+  workspaceId: string,
+): Promise<WorkspaceInfo> {
   const workspace = await prisma.workspace.findUnique({
     where: { id: workspaceId },
   });
 
   if (!workspace) {
-    throw Object.assign(new Error('Workspace not found'), { statusCode: 404 });
+    throw Object.assign(new Error("Workspace not found"), { statusCode: 404 });
   }
 
   return workspace;
@@ -46,7 +48,7 @@ export async function getMembers(workspaceId: string): Promise<SafeUser[]> {
   return prisma.user.findMany({
     where: { workspaceId },
     select: SAFE_USER_SELECT,
-    orderBy: { createdAt: 'asc' },
+    orderBy: { createdAt: "asc" },
   });
 }
 
@@ -60,7 +62,7 @@ export async function inviteMember(
     select: { id: true, name: true },
   });
   if (!workspace) {
-    throw Object.assign(new Error('Workspace not found'), { statusCode: 404 });
+    throw Object.assign(new Error("Workspace not found"), { statusCode: 404 });
   }
 
   const userExists = await prisma.user.findUnique({
@@ -68,11 +70,11 @@ export async function inviteMember(
     select: { id: true },
   });
   if (userExists) {
-    throw Object.assign(new Error('Email already in use'), { statusCode: 409 });
+    throw Object.assign(new Error("Email already in use"), { statusCode: 409 });
   }
 
-  const rawToken = crypto.randomBytes(32).toString('hex');
-  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const rawToken = crypto.randomBytes(32).toString("hex");
+  const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
 
   const invite = await prisma.workspaceInvite.create({
@@ -97,19 +99,24 @@ export async function inviteMember(
   return { inviteId: invite.id, expiresAt: invite.expiresAt };
 }
 
-export async function acceptInvite(input: AcceptInviteInput): Promise<SafeUser> {
-  const tokenHash = crypto.createHash('sha256').update(input.token).digest('hex');
+export async function acceptInvite(
+  input: AcceptInviteInput,
+): Promise<SafeUser> {
+  const tokenHash = crypto
+    .createHash("sha256")
+    .update(input.token)
+    .digest("hex");
   const invite = await prisma.workspaceInvite.findUnique({
     where: { tokenHash },
   });
   if (!invite) {
-    throw Object.assign(new Error('Invalid invite token'), { statusCode: 400 });
+    throw Object.assign(new Error("Invalid invite token"), { statusCode: 400 });
   }
   if (invite.consumedAt) {
-    throw Object.assign(new Error('Invite already used'), { statusCode: 409 });
+    throw Object.assign(new Error("Invite already used"), { statusCode: 409 });
   }
   if (invite.expiresAt < new Date()) {
-    throw Object.assign(new Error('Invite expired'), { statusCode: 410 });
+    throw Object.assign(new Error("Invite expired"), { statusCode: 410 });
   }
 
   const existing = await prisma.user.findUnique({
@@ -117,7 +124,7 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<SafeUser> 
     select: { id: true },
   });
   if (existing) {
-    throw Object.assign(new Error('Email already in use'), { statusCode: 409 });
+    throw Object.assign(new Error("Email already in use"), { statusCode: 409 });
   }
 
   const passwordHash = await hashPassword(input.password);
@@ -138,6 +145,14 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<SafeUser> 
       data: {
         consumedAt: new Date(),
         acceptedById: user.id,
+      },
+    });
+
+    await tx.workspaceMember.create({
+      data: {
+        userId: user.id,
+        workspaceId: invite.workspaceId,
+        role: invite.role,
       },
     });
 

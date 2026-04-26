@@ -10,6 +10,7 @@ import { sendSuccess, sendError } from "../../utils/response";
 import { env } from "../../config/env";
 import { resolveFinalModelId } from "../../config/models";
 import { RESOLUTION_CONFIG } from "../../config/model-photo";
+import { buildProductSwapBrandSuffix } from "../../services/prompt-builder/brand-kit-prompt.service";
 
 export async function productSwapRoutes(
   fastify: FastifyInstance,
@@ -42,6 +43,11 @@ export async function productSwapRoutes(
       // Product image first so the model knows which product to place in the scene
       const imageUrls = [data.productImageUrl, data.sceneImageUrl];
 
+      const brandSuffix = data.useBrandKit
+        ? await prisma.brandKit
+            .findUnique({ where: { workspaceId } })
+            .then((kit) => (kit ? buildProductSwapBrandSuffix(kit) : ""))
+        : "";
       const customExtra = data.customPrompt ? ` ${data.customPrompt}` : "";
       const prompt =
         `Use image 1 as the exact product reference. ` +
@@ -59,7 +65,7 @@ export async function productSwapRoutes(
         `Do not alter the product color. ` +
         `Do not create a new product, a modified version, or a similar-looking replacement. ` +
         `Do not add extra accessories, extra objects, text, logo, watermark, or decorative elements. ` +
-        `This is a precise product swap task: preserve image 2, replace only the product with image 1.${customExtra}`;
+        `This is a precise product swap task: preserve image 2, replace only the product with image 1.${customExtra}${brandSuffix}`;
 
       const resConfig = RESOLUTION_CONFIG[data.resolution];
       // Swap scenes are typically square; use square dimensions
@@ -105,6 +111,7 @@ export async function productSwapRoutes(
               imageUrls: imageUrls as Prisma.InputJsonValue,
               jobType: "PRODUCT_SWAP",
               creditsCost,
+              isDefaultPrompt: !data.customPrompt,
               storageProvider: env.STORAGE_PROVIDER,
             },
           });

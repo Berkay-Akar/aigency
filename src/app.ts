@@ -19,6 +19,7 @@ import { ghostMannequinRoutes } from "./modules/ai/ghost-mannequin.routes";
 import { socialRoutes } from "./modules/social/social.routes";
 import { schedulerRoutes } from "./modules/scheduler/scheduler.routes";
 import { billingRoutes } from "./modules/billing/billing.routes";
+import { brandRoutes, brandKitRoutes } from "./modules/brand";
 
 export function buildApp() {
   const fastify = Fastify({
@@ -67,6 +68,8 @@ export function buildApp() {
   fastify.register(socialRoutes);
   fastify.register(schedulerRoutes);
   fastify.register(billingRoutes);
+  fastify.register(brandRoutes);
+  fastify.register(brandKitRoutes);
 
   return fastify;
 }

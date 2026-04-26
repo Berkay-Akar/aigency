@@ -30,7 +30,7 @@ function parseDataUri(
 
 /** Upload a base64 data-URI string to Cloudinary and return the public URL. */
 async function uploadDataUri(
-  userId: string,
+  workspaceId: string,
   value: string,
   reply: FastifyReply,
 ): Promise<string | null> {
@@ -48,7 +48,7 @@ async function uploadDataUri(
     return null;
   }
   const uploaded = await uploadAiInputFile(
-    userId,
+    workspaceId,
     randomUUID(),
     parsed.buffer,
     parsed.mimetype,
@@ -58,7 +58,7 @@ async function uploadDataUri(
 
 /**
  * Factory that creates a Fastify preHandler which intercepts incoming images and
- * uploads them to Cloudinary `inputs/{userId}/` before the route handler runs.
+ * uploads them to Cloudinary `inputs/{workspaceId}/` before the route handler runs.
  *
  * Handles three cases transparently:
  *  1. `multipart/form-data`   — file parts are streamed, uploaded, URL injected into body
@@ -76,7 +76,7 @@ export function createUploadMiddleware(fields: FieldConfig[]) {
     reply: FastifyReply,
   ): Promise<void> {
     const contentType = request.headers["content-type"] ?? "";
-    const { sub: userId } = getUser(request);
+    const { workspaceId } = getUser(request);
 
     /* ------------------------------------------------------------------ */
     /* Case 1: multipart/form-data                                         */
@@ -114,7 +114,7 @@ export function createUploadMiddleware(fields: FieldConfig[]) {
               );
             }
             const { url } = await uploadAiInputFile(
-              userId,
+              workspaceId,
               randomUUID(),
               buffer,
               part.mimetype,
@@ -155,7 +155,7 @@ export function createUploadMiddleware(fields: FieldConfig[]) {
         const urls: string[] = [];
         for (const item of value) {
           if (typeof item === "string" && item.startsWith("data:")) {
-            const url = await uploadDataUri(userId, item, reply);
+            const url = await uploadDataUri(workspaceId, item, reply);
             if (url === null) return; // error already sent
             urls.push(url);
           } else if (typeof item === "string") {
@@ -164,7 +164,7 @@ export function createUploadMiddleware(fields: FieldConfig[]) {
         }
         body[bodyKey] = urls;
       } else if (typeof value === "string" && value.startsWith("data:")) {
-        const url = await uploadDataUri(userId, value, reply);
+        const url = await uploadDataUri(workspaceId, value, reply);
         if (url === null) return; // error already sent
         body[bodyKey] = url;
       }

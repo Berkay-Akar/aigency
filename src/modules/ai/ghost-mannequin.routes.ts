@@ -13,6 +13,7 @@ import {
   GHOST_MANNEQUIN_CREDIT_COST,
   buildGhostMannequinPrompt,
 } from "../../config/ghost-mannequin";
+import { buildGhostMannequinBrandSuffix } from "../../services/prompt-builder/brand-kit-prompt.service";
 
 export async function ghostMannequinRoutes(
   fastify: FastifyInstance,
@@ -42,9 +43,14 @@ export async function ghostMannequinRoutes(
       const jobId = randomUUID();
 
       const basePrompt = buildGhostMannequinPrompt(data.backgroundColor);
+      const brandSuffix = data.useBrandKit
+        ? await prisma.brandKit
+            .findUnique({ where: { workspaceId } })
+            .then((kit) => (kit ? buildGhostMannequinBrandSuffix(kit) : ""))
+        : "";
       const prompt = data.customPrompt
-        ? `${basePrompt} ${data.customPrompt}`
-        : basePrompt;
+        ? `${basePrompt} ${data.customPrompt}${brandSuffix}`
+        : `${basePrompt}${brandSuffix}`;
 
       try {
         await prisma.$transaction(async (tx) => {
@@ -88,6 +94,7 @@ export async function ghostMannequinRoutes(
               } as unknown as Prisma.InputJsonValue,
               jobType: "GHOST_MANNEQUIN",
               creditsCost,
+              isDefaultPrompt: !data.customPrompt,
               storageProvider: env.STORAGE_PROVIDER,
             },
           });

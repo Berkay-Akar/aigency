@@ -11,6 +11,7 @@ import { sendSuccess, sendError } from "../../utils/response";
 import { env } from "../../config/env";
 import { resolveFinalModelId } from "../../config/models";
 import { RESOLUTION_CONFIG } from "../../config/model-photo";
+import { buildProductAnglesBrandSuffix } from "../../services/prompt-builder/brand-kit-prompt.service";
 
 export async function productAnglesRoutes(
   fastify: FastifyInstance,
@@ -45,9 +46,18 @@ export async function productAnglesRoutes(
         | 2
       )[];
 
+      const brandSuffix = data.useBrandKit
+        ? await prisma.brandKit
+            .findUnique({ where: { workspaceId } })
+            .then((kit) => (kit ? buildProductAnglesBrandSuffix(kit) : ""))
+        : "";
+
       const jobs = angleIndexes.map((i) => ({
         jobId: randomUUID(),
         ...buildProductAnglePrompt(i, data.resolution, data.customPrompt),
+        prompt:
+          buildProductAnglePrompt(i, data.resolution, data.customPrompt)
+            .prompt + brandSuffix,
       }));
 
       try {
@@ -90,6 +100,7 @@ export async function productAnglesRoutes(
                 imageUrls: [data.productImageUrl] as Prisma.InputJsonValue,
                 jobType: "PRODUCT_STUDIO" as const,
                 creditsCost: creditPerImage,
+                isDefaultPrompt: !data.customPrompt,
                 storageProvider: env.STORAGE_PROVIDER,
               },
             });

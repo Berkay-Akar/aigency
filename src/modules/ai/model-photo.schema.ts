@@ -48,6 +48,7 @@ const BaseFieldsSchema = z.object({
     .optional(),
   modelTier: z.enum(["fast", "standard", "premium"]).default("standard"),
   outputFormat: z.enum(["png", "jpeg", "webp"]).default("webp"),
+  useBrandKit: z.boolean().default(false),
 });
 
 // ─── Discriminated variants ────────────────────────────────────────────────────

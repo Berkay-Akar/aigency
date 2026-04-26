@@ -124,7 +124,7 @@ export const aiWorker = new Worker<AiJobPayload>(
     }
 
     const ext = result.contentType.split("/")[1] ?? "bin";
-    const objectKey = userOutputKey(userId, jobId, ext);
+    const objectKey = userOutputKey(workspaceId, jobId, ext);
     let publicUrl: string;
     let storageKey: string;
     try {

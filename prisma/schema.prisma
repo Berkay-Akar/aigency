@@ -12,6 +12,15 @@ enum Role {
   MEMBER
 }
 
+enum BrandTone {
+  PROFESSIONAL
+  LUXURY
+  CASUAL
+  BOLD
+  MINIMALIST
+  PLAYFUL
+}
+
 enum Platform {
   INSTAGRAM
   TIKTOK
@@ -90,7 +99,8 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users             User[]
+  users             User[]             @relation("UserWorkspace")
+  members           WorkspaceMember[]
   socialConnections SocialConnection[]
   scheduledPosts    ScheduledPost[]
   assets            Asset[]
@@ -99,6 +109,7 @@ model Workspace {
   subscription      Subscription?
   creditLedger      CreditLedger[]
   discoverPosts     DiscoverPost[]
+  brandKit          BrandKit?
 
   @@index([slug])
 }
@@ -118,9 +129,10 @@ model User {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  invitesAccepted WorkspaceInvite[] @relation("InviteAcceptedBy")
-  authAuditLogs   AuthAuditLog[]
+  workspace            Workspace         @relation("UserWorkspace", fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceMemberships WorkspaceMember[]
+  invitesAccepted      WorkspaceInvite[] @relation("InviteAcceptedBy")
+  authAuditLogs        AuthAuditLog[]
 
   @@index([email])
   @@index([workspaceId])
@@ -270,6 +282,40 @@ model AuthAuditLog {
   @@index([email, createdAt])
 }
 
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role     @default(MEMBER)
+  joinedAt    DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([userId])
+  @@index([workspaceId])
+}
+
+model BrandKit {
+  id             String     @id @default(cuid())
+  workspaceId    String     @unique
+  brandName      String?
+  tagline        String?
+  industry       String?
+  website        String?
+  description    String?
+  logoUrl        String?
+  primaryColor   String?
+  secondaryColor String?
+  accentColor    String?
+  tone           BrandTone?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
 /// One row per POST /ai/generate — full request snapshot + lifecycle for DB inspection (BullMQ remains source of runtime queue).
 model AiGenerationJob {
   id              String              @id
@@ -308,6 +354,8 @@ model AiGenerationJob {
   /// Geçici URL fal çıktısı (CDN)
   falResultUrl    String?
   assetId         String?             @unique
+  /// True when no customPrompt was provided — frontend hides raw prompt text
+  isDefaultPrompt Boolean             @default(true)
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   completedAt     DateTime?

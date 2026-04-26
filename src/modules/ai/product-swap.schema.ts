@@ -13,6 +13,7 @@ export const ProductSwapSchema = z.object({
     .string()
     .max(500, "Custom prompt must be 500 characters or fewer")
     .optional(),
+  useBrandKit: z.boolean().default(false),
 });
 
 export type ProductSwapInput = z.infer<typeof ProductSwapSchema>;

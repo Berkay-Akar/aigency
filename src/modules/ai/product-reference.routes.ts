@@ -11,6 +11,7 @@ import { sendSuccess, sendError } from "../../utils/response";
 import { env } from "../../config/env";
 import { resolveFinalModelId } from "../../config/models";
 import { RESOLUTION_CONFIG } from "../../config/model-photo";
+import { buildProductReferenceBrandSuffix } from "../../services/prompt-builder/brand-kit-prompt.service";
 
 export async function productReferenceRoutes(
   fastify: FastifyInstance,
@@ -37,12 +38,22 @@ export async function productReferenceRoutes(
       const data = parsed.data;
 
       const creditsCost = RESOLUTION_CONFIG[data.resolution].creditsCost;
-      const { prompt, width, height, aspectRatio } =
-        buildProductReferencePrompt(
-          data.styleMode,
-          data.resolution,
-          data.customPrompt,
-        );
+      const {
+        prompt: basePrompt,
+        width,
+        height,
+        aspectRatio,
+      } = buildProductReferencePrompt(
+        data.styleMode,
+        data.resolution,
+        data.customPrompt,
+      );
+      const brandSuffix = data.useBrandKit
+        ? await prisma.brandKit
+            .findUnique({ where: { workspaceId } })
+            .then((kit) => (kit ? buildProductReferenceBrandSuffix(kit) : ""))
+        : "";
+      const prompt = `${basePrompt}${brandSuffix}`;
       const modelId = resolveFinalModelId("image-to-image", data.modelTier);
       const jobId = randomUUID();
 
@@ -91,6 +102,7 @@ export async function productReferenceRoutes(
               } as unknown as Prisma.InputJsonValue,
               jobType: "PRODUCT_SCENE_REFERENCE",
               creditsCost,
+              isDefaultPrompt: !data.customPrompt,
               storageProvider: env.STORAGE_PROVIDER,
             },
           });
